@@ -3,18 +3,10 @@ import test from "node:test";
 import { createContextKey, createDixous, defineExtension, HttpError } from "../dist/index.js";
 
 const url = "https://example.com/resource";
-const responseMethods = defineExtension({
-  methods: {
-    response: fetchResponse => () => fetchResponse(),
-    text: fetchResponse => async () => (await fetchResponse()).text(),
-    json: fetchResponse => async () => (await fetchResponse()).json(),
-  },
-});
-
 function setup(extensions = [], transport = async () => new Response("ok")) {
   const requests = [];
   const dixous = createDixous({
-    extensions: [...extensions, responseMethods],
+    extensions,
     fetch: request => {
       requests.push(request);
       return transport(request);
@@ -484,19 +476,19 @@ test("extension registrations and transport are captured during composition", as
   const events = [];
   const extension = defineExtension({
     request: async (_, next) => { events.push("original"); return next(); },
-    methods: { text: fetchResponse => async () => (await fetchResponse()).text() },
+    methods: { custom: fetchResponse => async () => (await fetchResponse()).text() },
   });
   const extensions = [extension];
   const options = { extensions, fetch: async () => new Response("original transport") };
   const dixous = createDixous(options);
   extension.request = async () => new Response("changed middleware");
-  extension.methods.text = () => async () => "changed method";
+  extension.methods.custom = () => async () => "changed method";
   extension.methods.added = () => async () => "added";
   extensions.push(defineExtension({ request: async () => new Response("added middleware") }));
   options.fetch = async () => new Response("changed transport");
   const pending = dixous.fetch(url);
-  assert.deepEqual(Object.keys(pending), ["text"]);
-  assert.equal(await pending.text(), "original transport");
+  assert.deepEqual(Object.keys(pending), ["json", "text", "blob", "arrayBuffer", "response", "custom"]);
+  assert.equal(await pending.custom(), "original transport");
   assert.deepEqual(events, ["original"]);
 });
 
@@ -504,14 +496,21 @@ test("default global transport is captured at composition", async () => {
   const original = globalThis.fetch;
   try {
     globalThis.fetch = async () => new Response("captured");
-    const dixous = createDixous({ extensions: [responseMethods] });
+    const dixous = createDixous();
     globalThis.fetch = async () => new Response("changed");
     assert.equal(await dixous.fetch(url).text(), "captured");
   } finally { globalThis.fetch = original; }
 });
 
 test("duplicate method names fail during composition", () => {
-  assert.throws(() => createDixous({ extensions: [responseMethods, responseMethods] }), /Duplicate response method: response/);
+  const custom = defineExtension({ methods: { custom: () => async () => "custom" } });
+  assert.throws(() => createDixous({ extensions: [custom, custom] }), /Duplicate response method: custom/);
+  for (const name of ["json", "text", "blob", "arrayBuffer", "response"]) {
+    const extension = defineExtension({ methods: { [name]: () => async () => "override" } });
+    assert.throws(() => createDixous({ extensions: [extension] }), {
+      message: `Duplicate response method: ${name}`,
+    });
+  }
 });
 
 test("pending method objects are immutable and handle Object prototype names", async () => {
@@ -545,9 +544,9 @@ test("root and configured fetchers keep independent client configurations", asyn
   assert.deepEqual(contexts[2].client, {});
 });
 
-test("an empty composition exposes no methods and never executes", () => {
+test("an empty composition exposes defaults without executing", () => {
   let called = false;
   const dixous = createDixous({ fetch: async () => { called = true; return new Response(); } });
-  assert.deepEqual(Object.keys(dixous.fetch(url)), []);
+  assert.deepEqual(Object.keys(dixous.fetch(url)), ["json", "text", "blob", "arrayBuffer", "response"]);
   assert.equal(called, false);
 });

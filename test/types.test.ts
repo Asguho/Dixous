@@ -1,3 +1,4 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import {
   createContextKey,
   createDixous,
@@ -32,10 +33,10 @@ const retry = defineExtension<
 
 const methods = defineExtension({
   methods: {
-    json: (fetchResponse: FetchResponse) => async <T>(
+    parsed: (fetchResponse: FetchResponse) => async <T>(
       schema: { parse(value: unknown): T },
     ): Promise<T> => schema.parse(await (await fetchResponse()).json()),
-    text: (fetchResponse: FetchResponse) => async (prefix = "") =>
+    prefixed: (fetchResponse: FetchResponse) => async (prefix = "") =>
       prefix + await (await fetchResponse()).text(),
   },
 });
@@ -60,13 +61,15 @@ const pending = client.fetch("/users", {
   method: "GET",
   signal: new AbortController().signal,
 });
-const json = pending.json({ parse: () => ({ name: "Ada" }) });
-const text = pending.text("prefix");
+const json = pending.parsed({ parse: () => ({ name: "Ada" }) });
+const text = pending.prefixed("prefix");
 type JsonResult = Expect<Equal<typeof json, Promise<{ name: string }>>>;
 type TextResult = Expect<Equal<typeof text, Promise<string>>>;
 
 // @ts-expect-error Schema is required.
 pending.json();
+// @ts-expect-error JSON requires a Standard Schema, not an arbitrary parser.
+pending.json({ parse: () => "invalid" });
 // @ts-expect-error Method arguments retain their types.
 pending.text(123);
 // @ts-expect-error Methods are readonly.
@@ -82,10 +85,29 @@ dixous({ auth: { token: 42 } });
 
 const empty = createDixous();
 empty({ baseUrl: "https://example.com" }).fetch("/");
-// @ts-expect-error There are no built-in response methods.
+// @ts-expect-error The default JSON method requires a schema.
 empty.fetch("https://example.com").json();
 // @ts-expect-error Unregistered options are unavailable.
 empty.fetch("https://example.com", { retry: {} });
+
+declare const transformedSchema: StandardSchemaV1<string, { count: number }>;
+const defaults = empty.fetch("https://example.com");
+const defaultJson = defaults.json(transformedSchema);
+const extendedJson = pending.json(transformedSchema);
+const defaultText = defaults.text();
+const defaultBlob = defaults.blob();
+const defaultBuffer = defaults.arrayBuffer();
+const defaultResponse = defaults.response();
+type DefaultJson = Expect<Equal<typeof defaultJson, Promise<{ count: number }>>>;
+type ExtendedJson = Expect<Equal<typeof extendedJson, Promise<{ count: number }>>>;
+type DefaultText = Expect<Equal<typeof defaultText, Promise<string>>>;
+type DefaultBlob = Expect<Equal<typeof defaultBlob, Promise<Blob>>>;
+type DefaultBuffer = Expect<Equal<typeof defaultBuffer, Promise<ArrayBuffer>>>;
+type DefaultResponse = Expect<Equal<typeof defaultResponse, Promise<Response>>>;
+// @ts-expect-error Default methods take no extra arguments.
+defaults.text("prefix");
+// @ts-expect-error The generic parameter is a schema, not the desired output.
+defaults.json<{ count: number }>(transformedSchema);
 
 // @ts-expect-error Request extensions cannot override native fields.
 defineExtension<{ headers: string }>();

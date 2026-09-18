@@ -1,25 +1,16 @@
 # Dixous
 
 A small TypeScript query client built on native `Request`, `Response`, and Fetch.
-The core has no runtime dependencies. Extensions supply request middleware and
-response methods; no response methods are installed by default.
+The core has no runtime imports from dependencies. Standard Schema types come
+from `@standard-schema/spec`. Five response methods are available by default;
+extensions can add request middleware and additional response methods.
 
 ## Usage
 
 ```ts
-import { createDixous, defineExtension, type FetchResponse } from "dixous";
+import { createDixous } from "dixous";
 
-const responses = defineExtension({
-  methods: {
-    text: (fetchResponse: FetchResponse) => async () => (await fetchResponse()).text(),
-    json: (fetchResponse: FetchResponse) => async <T>(schema: { parse(value: unknown): T }) => {
-      const response = await fetchResponse();
-      return schema.parse(await response.json());
-    },
-  },
-});
-
-const dixous = createDixous({ extensions: [responses] });
+const dixous = createDixous();
 const api = dixous({
   baseUrl: "https://example.com/api/",
   headers: { accept: "application/json" },
@@ -33,6 +24,35 @@ const again = await pending.text(); // Executes a separate operation.
 `createDixous({ extensions, fetch })` accepts an optional custom transport with
 the native Fetch signature. The root `dixous.fetch(...)` uses an empty client
 configuration. Calling `dixous(options)` creates a configured fetcher.
+
+## Default response methods
+
+| Method | Result |
+| --- | --- |
+| `json(schema)` | `Promise<InferOutput<typeof schema>>` |
+| `text()` | `Promise<string>` |
+| `blob()` | `Promise<Blob>` |
+| `arrayBuffer()` | `Promise<ArrayBuffer>` |
+| `response()` | `Promise<Response>` |
+
+`json<Schema extends StandardSchemaV1>(schema: Schema)` requires a
+[Standard Schema v1](https://standardschema.dev/schema) validator. It parses the
+JSON body, awaits synchronous or asynchronous validation, and returns the
+validator's output, including any transformations. TypeScript infers the output
+from the supplied schema. `InferOutput` is also exported as a type from Dixous.
+
+Validation failures reject with `SchemaValidationError`, whose `issues` property
+preserves the validator's issues and paths. Invalid JSON and errors thrown by
+the validator propagate unchanged. Parsing and validation occur after request
+middleware completes and after the HTTP status gate.
+
+The other body methods delegate to their native Response equivalents.
+`response()` returns the original successful response without consuming it.
+Each invocation of any method executes its own independent operation.
+
+Default names are reserved: an extension registering `json`, `text`, `blob`,
+`arrayBuffer`, or `response` causes `createDixous()` to throw a duplicate-method
+error, just like two extensions registering the same custom name.
 
 ## Extension configuration and state
 

@@ -1,3 +1,4 @@
+import { defaultResponseMethods, type DefaultResponseMethods } from "./response-methods.js";
 import type {
   ClientOptions,
   Context,
@@ -18,6 +19,9 @@ import type {
   RequestOptions,
   ResponseMethods,
 } from "./types.js";
+
+export { SchemaValidationError } from "./response-methods.js";
+export type { DefaultResponseMethods, InferOutput } from "./response-methods.js";
 
 export type {
   BaseClientOptions,
@@ -168,11 +172,11 @@ export function createDixous<
 }): Dixous<
   ExtensionRequestOptions<Extensions>,
   ExtensionClientOptions<Extensions>,
-  ExtensionMethods<Extensions>
+  DefaultResponseMethods & ExtensionMethods<Extensions>
 > {
   const fetchImpl = options?.fetch ?? globalThis.fetch;
   const middleware: Middleware[] = [];
-  const methods = new Map<string, ResponseMethods[string]>();
+  const methods = new Map<string, ResponseMethods[string]>(Object.entries(defaultResponseMethods));
 
   for (const entry of options?.extensions ?? []) {
     // Contributions are erased only inside the kernel; the public signature
@@ -210,6 +214,6 @@ export function createDixous<
   return Object.assign(configured, { fetch: configured().fetch }) as Dixous<
     ExtensionRequestOptions<Extensions>,
     ExtensionClientOptions<Extensions>,
-    ExtensionMethods<Extensions>
+    DefaultResponseMethods & ExtensionMethods<Extensions>
   >;
 }
