@@ -63,7 +63,7 @@ const query = defineExtension<{ query?: Record<string, string> }>()({
   async request(context, next) {
     const url = new URL(context.request.url);
     for (const [key, value] of Object.entries(context.options.query ?? {})) {
-      url.searchParams.set(key, value);
+      url.searchParams.append(key, value);
     }
     context.request = new Request(url, context.request);
     return next();
