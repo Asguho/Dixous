@@ -17,7 +17,10 @@ const User = z.object({
   name: z.string(),
 });
 
-const api = dixous({ baseUrl: "https://api.example.com/" });
+const api = dixous({
+  baseUrl: "https://api.example.com/",
+  headers: { Authorization: "Bearer YOUR_API_TOKEN" },
+});
 const user = await api.fetch("users/1").json(User);
 
 console.log(user.name); // string, validated at runtime
