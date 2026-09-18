@@ -72,8 +72,7 @@ const query = defineExtension<{ query?: Record<string, string> }>()({
 
 export const dixous = createDixous({ extensions: [xml, query, retry] });
 ```
-
-The XML example uses [Xmlod](https://github.com/Asguho/xmlod) and Zod (`npm install @asguho/xmlod zod`). Use the extended client anywhere:
+Use the extended client anywhere:
 
 ```ts
 import { dixous } from "./lib/dixous";
@@ -89,6 +88,8 @@ const result = await dixous.fetch("https://example.com/catalog", {
 
 console.log(result.catalog.book); // { title: string }[]
 ```
+
+The XML example uses [Xmlod](https://github.com/Asguho/xmlod) and Zod (`npm install @asguho/xmlod zod`). 
 
 ## Development
 
