@@ -78,7 +78,10 @@ export type ExtensionDefinition<
   RequestExtra extends object,
   ClientExtra extends object,
   Methods extends ResponseMethods,
-> = Pick<Extension<RequestExtra, ClientExtra, Methods>, "request" | "methods">;
+> = Pick<Extension<RequestExtra, ClientExtra, Methods>, "request"> & {
+  // Contextually type factory parameters while preserving each method's signature.
+  methods?: Methods & Record<string, (fetchResponse: FetchResponse) => unknown>;
+};
 
 export type NoRequestInitOverrides = {
   [K in keyof RequestInit]?: never;

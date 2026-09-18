@@ -33,10 +33,12 @@ const retry = defineExtension<
 
 const methods = defineExtension({
   methods: {
-    parsed: (fetchResponse: FetchResponse) => async <T>(
-      schema: { parse(value: unknown): T },
-    ): Promise<T> => schema.parse(await (await fetchResponse()).json()),
-    prefixed: (fetchResponse: FetchResponse) => async (prefix = "") =>
+    parsed: (fetchResponse) => {
+      type InferredFetchResponse = Expect<Equal<typeof fetchResponse, FetchResponse>>;
+      return async <T>(schema: { parse(value: unknown): T }): Promise<T> =>
+        schema.parse(await (await fetchResponse()).json());
+    },
+    prefixed: (fetchResponse) => async (prefix = "") =>
       prefix + await (await fetchResponse()).text(),
   },
 });
@@ -65,6 +67,69 @@ const json = pending.parsed({ parse: () => ({ name: "Ada" }) });
 const text = pending.prefixed("prefix");
 type JsonResult = Expect<Equal<typeof json, Promise<{ name: string }>>>;
 type TextResult = Expect<Equal<typeof text, Promise<string>>>;
+
+// @ts-expect-error Inferred custom methods preserve required arguments.
+pending.parsed();
+// @ts-expect-error Inferred custom methods preserve argument types.
+pending.prefixed(123);
+
+const configuredMethods = defineExtension<
+  { trace?: boolean },
+  { traceLabel?: string }
+>()({
+  async request(context, next) {
+    type TraceOption = Expect<Equal<typeof context.options.trace, boolean | undefined>>;
+    type TraceLabel = Expect<Equal<typeof context.client.traceLabel, string | undefined>>;
+    return next();
+  },
+  methods: {
+    decoded(fetchResponse) {
+      type InferredFetchResponse = Expect<Equal<typeof fetchResponse, FetchResponse>>;
+      return async <T>(decode: (response: Response) => T) => {
+        const response = await fetchResponse();
+        type InferredResponse = Expect<Equal<typeof response, Response>>;
+        // @ts-expect-error The inferred factory callback takes no arguments.
+        fetchResponse("unexpected");
+        return decode(response);
+      };
+    },
+    annotated: (fetchResponse: FetchResponse) => async () =>
+      (await fetchResponse()).status,
+  },
+});
+const configuredPending = createDixous({ extensions: [configuredMethods] })({
+  traceLabel: "test",
+}).fetch("https://example.com", { trace: true });
+const decoded = configuredPending.decoded(response => ({ status: response.status }));
+type DecodedResult = Expect<Equal<typeof decoded, Promise<{ status: number }>>>;
+const annotated = configuredPending.annotated();
+type AnnotatedResult = Expect<Equal<typeof annotated, Promise<number>>>;
+// @ts-expect-error Curried definitions preserve custom method arguments.
+configuredPending.decoded("not a decoder");
+// @ts-expect-error Contextual typing must not expose unregistered methods.
+configuredPending.missing();
+
+const noOptionsMethods = defineExtension()({
+  methods: {
+    status: fetchResponse => async () => (await fetchResponse()).status,
+  },
+});
+const inferredStatus = createDixous({ extensions: [noOptionsMethods] })
+  .fetch("https://example.com").status();
+type InferredStatus = Expect<Equal<typeof inferredStatus, Promise<number>>>;
+
+defineExtension({
+  methods: {
+    // @ts-expect-error Factories must return a response method, not a value.
+    invalid: fetchResponse => 123,
+  },
+});
+defineExtension()({
+  methods: {
+    // @ts-expect-error Response methods must return promises.
+    invalid: fetchResponse => () => "synchronous",
+  },
+});
 
 // @ts-expect-error Schema is required.
 pending.json();

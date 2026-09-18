@@ -1,6 +1,8 @@
 # Dixous
 
-A minimal, typed Fetch client. From your first request to custom caching, extend it as your application grows.
+A minimal, fully typed, extendable fetch client.
+
+Start with a simple request, then add validation, middleware, and custom response handlers as you need them.
 
 ## Usage
 
@@ -29,14 +31,14 @@ Define your client once. Add response methods, middleware, and typed options wit
 
 ```ts
 // lib/dixous.ts
-import { createDixous, defineExtension, type FetchResponse } from "dixous";
+import { createDixous, defineExtension } from "dixous";
 import { parseXml } from "@asguho/xmlod";
 import { z } from "zod";
 
 // Parse and validate XML with Xmlod.
 const xml = defineExtension({
   methods: {
-    xml: (fetchResponse: FetchResponse) =>
+    xml: (fetchResponse) =>
       async <S extends z.ZodType>(schema: S): Promise<z.output<S>> =>
         parseXml(await (await fetchResponse()).text(), schema),
   },
