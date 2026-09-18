@@ -1,25 +1,36 @@
 # Dixous
 
-A small TypeScript query client built on native `Request`, `Response`, and Fetch.
-The core has no runtime imports from dependencies. Standard Schema types come
-from `@standard-schema/spec`. Five response methods are available by default;
-extensions can add request middleware and additional response methods.
+A typed Fetch client with lazy requests, composable middleware, and
+schema-validated responses. Built on native `Request` and `Response`, with
+`json(schema)`, `text()`, `blob()`, `arrayBuffer()`, and `response()` ready to use.
 
 ## Usage
 
 ```ts
 import { createDixous } from "dixous";
+import { z } from "zod";
 
-const dixous = createDixous();
-const api = dixous({
-  baseUrl: "https://example.com/api/",
+const User = z.object({
+  id: z.number(),
+  name: z.string(),
+});
+
+const api = createDixous()({
+  baseUrl: "https://api.example.com/",
   headers: { accept: "application/json" },
 });
 
-const pending = api.fetch("users"); // Constructs a request; no middleware or I/O.
-const text = await pending.text();  // Executes one operation.
-const again = await pending.text(); // Executes a separate operation.
+const pending = api.fetch("users/1"); // No network request yet
+const user = await pending.json(User); // Fetch, validate, and infer the type
+console.log(user.name); // string
+
+const status = await api.fetch("status").text();
+const avatar = await api.fetch("users/1/avatar").blob();
 ```
+
+This example uses Zod; `json(schema)` accepts any Standard Schema v1 validator.
+Each response-method call starts an independent operation, even when reusing
+the same pending request.
 
 `createDixous({ extensions, fetch })` accepts an optional custom transport with
 the native Fetch signature. The root `dixous.fetch(...)` uses an empty client
