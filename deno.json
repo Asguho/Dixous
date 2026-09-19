@@ -3,9 +3,6 @@
   "version": "0.1.1",
   "license": "MIT",
   "exports": "./src/index.ts",
-  "imports": {
-    "@standard-schema/spec": "npm:@standard-schema/spec@^1.1.0"
-  },
   "compilerOptions": {
     "lib": [
       "deno.ns",

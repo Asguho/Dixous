@@ -1,4 +1,4 @@
-import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { StandardSchemaV1 } from "./standard-schema.ts";
 import type { FetchResponse, ResponseMethods } from "./types.ts";
 
 export type InferOutput<Schema extends StandardSchemaV1> =

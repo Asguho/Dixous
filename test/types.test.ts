@@ -1,4 +1,3 @@
-import type { StandardSchemaV1 } from "@standard-schema/spec";
 import {
   createContextKey,
   createDixous,
@@ -155,7 +154,17 @@ empty.fetch("https://example.com").json();
 // @ts-expect-error Unregistered options are unavailable.
 empty.fetch("https://example.com", { retry: {} });
 
-declare const transformedSchema: StandardSchemaV1<string, { count: number }>;
+// A separately declared schema checks structural compatibility and output inference.
+declare const transformedSchema: {
+  readonly "~standard": {
+    readonly version: 1;
+    readonly vendor: "test";
+    readonly types?: { readonly input: string; readonly output: { count: number } };
+    readonly validate: (value: unknown) =>
+      | { value: { count: number }; issues?: undefined }
+      | { issues: readonly { message: string }[] };
+  };
+};
 const defaults = empty.fetch("https://example.com");
 const defaultJson = defaults.json(transformedSchema);
 const extendedJson = pending.json(transformedSchema);
