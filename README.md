@@ -28,9 +28,7 @@ const User = z.object({
   name: z.string(),
 });
 
-const user = await api
-  .request("users/1")
-  .json(User);
+const user = await api.request("users/1").json(User);
 
 console.log(user.name); // string
 ```
@@ -43,12 +41,12 @@ Dixous works with any [Standard Schema](https://standardschema.dev/) validator.
 
 Dixous tries to stay small without becoming limiting.
 
-* Built around native `Request` and `Response`
-* Runtime validation with full TypeScript inference
-* Immutable clients that can be progressively specialized
-* Extensions can add middleware, configuration, client methods, and response methods
-* Features such as retrying, caching, logging, and custom formats do not need to be built into the core
-* Drop down to the native `Response` whenever you need to
+- Built around native `Request` and `Response`
+- Runtime validation with full TypeScript inference
+- Immutable clients that can be progressively specialized
+- Extensions can add middleware, configuration, client methods, and response methods
+- Features such as retrying, caching, logging, and custom formats do not need to be built into the core
+- Drop down to the native `Response` whenever you need to
 
 ## Extend the API itself
 
@@ -57,10 +55,7 @@ Extensions do more than run hooks. They can add completely new, fully typed APIs
 For example, [Schema XML](https://github.com/Asguho/schema-xml) can make XML feel like a native Dixous response format:
 
 ```ts
-import {
-  Dixous,
-  defineExtension,
-} from "dixous";
+import { Dixous, defineExtension } from "dixous";
 import { parseXml } from "schema-xml";
 import { z } from "zod";
 
@@ -68,16 +63,10 @@ const xml = defineExtension({
   operation(operation) {
     return {
       xml: operation.terminal(
-        async <Schema extends z.ZodType>(
-          schema: Schema,
-        ): Promise<z.output<Schema>> => {
-          const response =
-            await operation.successfulResponse();
+        async <Schema extends z.ZodType>(schema: Schema): Promise<z.output<Schema>> => {
+          const response = await operation.successfulResponse();
 
-          return parseXml(
-            await response.text(),
-            schema,
-          );
+          return parseXml(await response.text(), schema);
         },
       ),
     };
@@ -98,9 +87,7 @@ const Catalog = z.object({
   }),
 });
 
-const catalog = await api
-  .request("https://example.com/catalog.xml")
-  .xml(Catalog);
+const catalog = await api.request("https://example.com/catalog.xml").xml(Catalog);
 
 console.log(catalog.catalog.book);
 // { title: string }[]
@@ -117,18 +104,13 @@ npm install schema-xml zod
 Use ordinary promise rejection:
 
 ```ts
-const user = await api
-  .request("users/1")
-  .json(User);
+const user = await api.request("users/1").json(User);
 ```
 
 Or turn the same operation into an explicit result:
 
 ```ts
-const result = await api
-  .request("users/1")
-  .json(User)
-  .result();
+const result = await api.request("users/1").json(User).result();
 
 if (result.ok) {
   console.log(result.value.name);
@@ -140,9 +122,7 @@ if (result.ok) {
 And when you want full control over HTTP semantics, use the native response:
 
 ```ts
-const response = await api
-  .request("users/1")
-  .response();
+const response = await api.request("users/1").response();
 
 if (response.status === 404) {
   // Handle an expected 404.
@@ -158,26 +138,13 @@ const query = defineExtension<{
   query?: Record<string, string>;
 }>()({
   async middleware(context, dispatch) {
-    const url =
-      new URL(context.request.url);
+    const url = new URL(context.request.url);
 
-    for (
-      const [key, value]
-      of Object.entries(
-        context.options.query ?? {},
-      )
-    ) {
-      url.searchParams.append(
-        key,
-        value,
-      );
+    for (const [key, value] of Object.entries(context.options.query ?? {})) {
+      url.searchParams.append(key, value);
     }
 
-    context.request =
-      new Request(
-        url,
-        context.request,
-      );
+    context.request = new Request(url, context.request);
 
     return dispatch();
   },
