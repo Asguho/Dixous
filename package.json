@@ -1,10 +1,13 @@
 {
   "name": "dixous",
-  "version": "0.0.0",
+  "version": "0.1.1",
   "description": "A minimal, extension-driven query client built on native Fetch.",
   "type": "module",
   "files": [
-    "dist",
+    "dist/*.js",
+    "dist/*.js.map",
+    "dist/*.d.ts",
+    "dist/*.d.ts.map",
     "src"
   ],
   "exports": {
@@ -17,12 +20,31 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "npm run build && npm run typecheck && node --test test/*.test.mjs",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "test:package": "node scripts/test-package.mjs",
+    "check:release": "node scripts/check-release.mjs"
   },
   "devDependencies": {
     "typescript": "^7.0.2"
   },
   "dependencies": {
     "@standard-schema/spec": "^1.1.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Asguho/Dixous.git"
+  },
+  "homepage": "https://github.com/Asguho/Dixous#readme",
+  "bugs": {
+    "url": "https://github.com/Asguho/Dixous/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
   }
 }

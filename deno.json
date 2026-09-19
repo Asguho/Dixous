@@ -1,0 +1,28 @@
+{
+  "name": "@asguho/dixous",
+  "version": "0.1.1",
+  "license": "MIT",
+  "exports": "./src/index.ts",
+  "imports": {
+    "@standard-schema/spec": "npm:@standard-schema/spec@^1.1.0"
+  },
+  "compilerOptions": {
+    "lib": [
+      "deno.ns",
+      "dom",
+      "dom.iterable",
+      "es2022"
+    ],
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true
+  },
+  "publish": {
+    "include": [
+      "src/**/*.ts",
+      "README.md",
+      "LICENSE",
+      "RELEASING.md"
+    ]
+  }
+}

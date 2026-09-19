@@ -4,10 +4,16 @@ A minimal, fully typed, extendable fetch client.
 
 Start with a simple request, then add validation, middleware, and custom response handlers as you need them.
 
+## Installation
+
+```sh
+npm install dixous
+```
+
 ## Usage
 
 ```ts
-import { dixous } from "./lib/dixous";
+import { dixous } from "./lib/dixous"; // Shared client created with createDixous
 import { z } from "zod";
 
 const image = await dixous.fetch("https://example.com/image.png").blob();
@@ -100,3 +106,5 @@ The XML example uses [Schema XML](https://github.com/Asguho/schema-xml) and Zod 
 npm ci
 npm test
 ```
+
+See [RELEASING.md](./RELEASING.md) for npm and JSR publishing.

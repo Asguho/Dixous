@@ -1,4 +1,4 @@
-import { defaultResponseMethods, type DefaultResponseMethods } from "./response-methods.js";
+import { defaultResponseMethods, type DefaultResponseMethods } from "./response-methods.ts";
 import type {
   ClientOptions,
   Context,
@@ -18,10 +18,10 @@ import type {
   RequestContext,
   RequestOptions,
   ResponseMethods,
-} from "./types.js";
+} from "./types.ts";
 
-export { SchemaValidationError } from "./response-methods.js";
-export type { DefaultResponseMethods, InferOutput } from "./response-methods.js";
+export { SchemaValidationError } from "./response-methods.ts";
+export type { DefaultResponseMethods, InferOutput } from "./response-methods.ts";
 
 export type {
   BaseClientOptions,
@@ -36,7 +36,7 @@ export type {
   Next,
   RequestContext,
   RequestOptions,
-} from "./types.js";
+} from "./types.ts";
 
 export function createContextKey<T>(): ContextKey<T> {
   return Symbol() as ContextKey<T>;

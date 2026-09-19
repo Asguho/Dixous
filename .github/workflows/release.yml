@@ -1,0 +1,46 @@
+name: Publish package (manual)
+on:
+  workflow_dispatch:
+    inputs:
+      registry:
+        description: Registry to publish to
+        type: choice
+        options: [npm, jsr, both]
+        required: true
+      version:
+        description: Exact version in package.json and deno.json
+        type: string
+        required: true
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: package-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    environment: package-publish
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.18.1
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.6
+      - run: npm install --global npm@11.16.0
+      - run: npm ci
+      - run: npm run check:release
+      - run: npm test
+      - run: npm run test:package
+      - run: deno publish --dry-run
+      - name: Publish npm tarball
+        if: inputs.registry == 'npm' || inputs.registry == 'both'
+        run: npm publish "dist/dixous-${EXPECTED_VERSION}.tgz" --access public --provenance
+      - name: Publish to JSR
+        if: inputs.registry == 'jsr' || inputs.registry == 'both'
+        run: deno publish

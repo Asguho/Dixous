@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const read = path => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
+const npm = read('../package.json');
+const jsr = read('../deno.json');
+const lock = read('../package-lock.json');
+assert.equal(npm.name, 'dixous');
+assert.equal(jsr.name, '@asguho/dixous');
+assert.equal(npm.version, jsr.version, 'npm and JSR versions must match');
+assert.equal(npm.version, lock.version, 'Update package-lock.json');
+assert.equal(npm.version, lock.packages[''].version);
+if (process.env.EXPECTED_VERSION) assert.equal(npm.version, process.env.EXPECTED_VERSION);
+console.log(`Release metadata verified: ${npm.version}`);

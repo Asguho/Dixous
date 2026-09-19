@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import type { FetchResponse, ResponseMethods } from "./types.js";
+import type { FetchResponse, ResponseMethods } from "./types.ts";
 
 export type InferOutput<Schema extends StandardSchemaV1> =
   StandardSchemaV1.InferOutput<Schema>;
