@@ -171,6 +171,41 @@ console.log(result.catalog.book);
 The XML example uses [Schema XML](https://github.com/Asguho/schema-xml) and Zod (`npm install schema-xml zod`).
 
 See [Extensions](./docs/extensions.md) for middleware ordering, `dispatch()`, custom terminals, extension state, retries, and more advanced extension patterns.
+## Errors and raw responses
+
+Terminal methods reject like ordinary promises. If you prefer to handle failures as values, call `.result()` on the terminal:
+
+```ts
+const result = await dixous
+  .request("users/1")
+  .json(User)
+  .result();
+
+if (result.ok) {
+  console.log(result.value.name);
+} else {
+  console.error(result.error);
+}
+```
+
+`.result()` observes the same request invocation. It does not send the request again.
+
+Built-in body methods such as `.json()`, `.text()`, and `.blob()` expect a successful HTTP response. When the response status itself is part of your application logic, use `.response()` as the escape hatch:
+
+```ts
+const response = await dixous
+  .request("users/1")
+  .response();
+
+if (response.status === 404) {
+  // Handle an expected missing user.
+} else if (response.ok) {
+  const user = await response.json();
+}
+```
+
+`.response()` returns the native `Response` without applying an HTTP status policy, so responses such as `404`, `409`, and `500` are returned normally.
+
 
 ## Development
 
