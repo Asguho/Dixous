@@ -2,7 +2,9 @@
 
 A small, fully typed HTTP client built on Fetch.
 
-Dixous gives you a simple request API, runtime-validated responses, and an extension system that can add new behavior and new APIs without losing type inference.
+Dixous gives you a simple request API, runtime-validated responses, and an
+extension system that can add new behavior and new APIs without losing type
+inference.
 
 ## Installation
 
@@ -44,15 +46,19 @@ Dixous tries to stay small without becoming limiting.
 - Built around native `Request` and `Response`
 - Runtime validation with full TypeScript inference
 - Immutable clients that can be progressively specialized
-- Extensions can add middleware, configuration, client methods, and response methods
-- Features such as retrying, caching, logging, and custom formats do not need to be built into the core
+- Extensions can add middleware, configuration, client methods, and response
+  methods
+- Features such as retrying, caching, logging, and custom formats do not need to
+  be built into the core
 - Drop down to the native `Response` whenever you need to
 
 ## Extend the API itself
 
-Extensions do more than run hooks. They can add completely new, fully typed APIs.
+Extensions do more than run hooks. They can add completely new, fully typed
+APIs.
 
-For example, [Schema XML](https://github.com/Asguho/schema-xml) can make XML feel like a native Dixous response format:
+For example, [Schema XML](https://github.com/Asguho/schema-xml) can make XML
+feel like a native Dixous response format:
 
 ```ts
 import { Dixous, defineExtension } from "dixous";
@@ -87,13 +93,16 @@ const Catalog = z.object({
   }),
 });
 
-const catalog = await api.request("https://example.com/catalog.xml").xml(Catalog);
+const catalog = await api
+  .request("https://example.com/catalog.xml")
+  .xml(Catalog);
 
 console.log(catalog.catalog.book);
 // { title: string }[]
 ```
 
-Dixous itself knows nothing about XML. The extension adds `.xml(schema)` to the client with the same type inference you would expect from a built-in API.
+Dixous itself knows nothing about XML. The extension adds `.xml(schema)` to the
+client with the same type inference you would expect from a built-in API.
 
 ```sh
 npm install schema-xml zod
@@ -173,9 +182,12 @@ const books = await api
 
 Remove the extension and `query` disappears from the type.
 
-The same extension system can power retries, authentication, caching, logging, tracing, custom transports, custom response formats, and application-specific APIs.
+The same extension system can power retries, authentication, caching, logging,
+tracing, custom transports, custom response formats, and application-specific
+APIs.
 
-See [Extensions](./docs/extensions.md) for the full extension model and advanced patterns.
+See [Extensions](./docs/extensions.md) for the full extension model and advanced
+patterns.
 
 ## Development
 
