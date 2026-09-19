@@ -13,26 +13,35 @@ npm install dixous
 ## Usage
 
 ```ts
-import { dixous } from "./lib/dixous"; // Shared client created with createDixous
+import { Dixous } from "dixous";
 import { z } from "zod";
 
-const image = await dixous.fetch("https://example.com/image.png").blob();
+export const dixous = Dixous.create({
+  baseUrl: "https://api.example.com/",
+  headers: {
+    Authorization: "Bearer YOUR_API_TOKEN",
+  },
+});
+
+const image = await dixous
+  .request("https://example.com/image.png")
+  .blob();
 
 const User = z.object({
   id: z.number(),
   name: z.string(),
 });
 
-const api = dixous({
-  baseUrl: "https://api.example.com/",
-  headers: { Authorization: "Bearer YOUR_API_TOKEN" },
-});
-const user = await api.fetch("users/1").json(User);
+const user = await dixous
+  .request("users/1")
+  .json(User);
 
 console.log(user.name); // string, validated at runtime
 ```
 
-Requests run when you call `.json(schema)`, `.text()`, `.blob()`, `.arrayBuffer()`, or `.response()`. JSON accepts any Standard Schema v1 validator.
+Requests run when you call `.json(schema)`, `.text()`, `.blob()`, `.arrayBuffer()`, `.response()`, or another terminal added by an extension.
+
+JSON accepts any Standard Schema v1 validator.
 
 ## Fully extensible
 
@@ -40,47 +49,94 @@ Define your client once. Add response methods, middleware, and typed options wit
 
 ```ts
 // lib/dixous.ts
-import { createDixous, defineExtension } from "dixous";
+
+import {
+  Dixous,
+  defineExtension,
+} from "dixous";
 import { parseXml } from "schema-xml";
 import { z } from "zod";
 
 // Parse and validate XML with Schema XML.
 const xml = defineExtension({
-  methods: {
-    xml: (fetchResponse) =>
-      async <S extends z.ZodType>(schema: S): Promise<z.output<S>> =>
-        parseXml(await (await fetchResponse()).text(), schema),
+  operation(operation) {
+    return {
+      xml: operation.terminal(
+        async <S extends z.ZodType>(
+          schema: S,
+        ): Promise<z.output<S>> => {
+          const response =
+            await operation.successfulResponse();
+
+          return parseXml(
+            await response.text(),
+            schema,
+          );
+        },
+      ),
+    };
   },
 });
 
 // Retry GET requests up to three times in total on a 503 response.
-const retry = defineExtension({
-  async request({ request }, next) {
+const retry = defineExtension<{
+  retryAttempts?: number;
+}>()({
+  async middleware(context, dispatch) {
+    const attempts =
+      context.options.retryAttempts ?? 3;
+
     for (let attempt = 1; ; attempt++) {
-      request.signal.throwIfAborted();
-      const response = await next();
-      if (request.method !== "GET" || response.status !== 503 || attempt === 3) {
+      context.request.signal.throwIfAborted();
+
+      const response = await dispatch();
+
+      if (
+        context.request.method !== "GET" ||
+        response.status !== 503 ||
+        attempt >= attempts
+      ) {
         return response;
       }
+
       await response.body?.cancel();
     }
   },
 });
 
 // Add a typed query option.
-const query = defineExtension<{ query?: Record<string, string> }>()({
-  async request(context, next) {
+const query = defineExtension<{
+  query?: Record<string, string>;
+}>()({
+  async middleware(context, dispatch) {
     const url = new URL(context.request.url);
-    for (const [key, value] of Object.entries(context.options.query ?? {})) {
+
+    for (
+      const [key, value]
+      of Object.entries(
+        context.options.query ?? {},
+      )
+    ) {
       url.searchParams.append(key, value);
     }
-    context.request = new Request(url, context.request);
-    return next();
+
+    context.request =
+      new Request(url, context.request);
+
+    return dispatch();
   },
 });
 
-export const dixous = createDixous({ extensions: [xml, query, retry] });
+export const dixous = Dixous.create({
+  extensions: [
+    xml,
+    query,
+    retry,
+  ],
+  retryAttempts: 3,
+});
 ```
+
 Use the extended client anywhere:
 
 ```ts
@@ -88,17 +144,33 @@ import { dixous } from "./lib/dixous";
 import { z } from "zod";
 
 const Catalog = z.object({
-  catalog: z.object({ book: z.array(z.object({ title: z.string() })) }),
+  catalog: z.object({
+    book: z.array(
+      z.object({
+        title: z.string(),
+      }),
+    ),
+  }),
 });
 
-const result = await dixous.fetch("https://example.com/catalog", {
-  query: { author: "Ursula K. Le Guin" },
-}).xml(Catalog);
+const result = await dixous
+  .request(
+    "https://example.com/catalog",
+    {
+      query: {
+        author: "Ursula K. Le Guin",
+      },
+    },
+  )
+  .xml(Catalog);
 
-console.log(result.catalog.book); // { title: string }[]
+console.log(result.catalog.book);
+// { title: string }[]
 ```
 
-The XML example uses [Schema XML](https://github.com/Asguho/schema-xml) and Zod (`npm install schema-xml zod`). 
+The XML example uses [Schema XML](https://github.com/Asguho/schema-xml) and Zod (`npm install schema-xml zod`).
+
+See [Extensions](./docs/extensions.md) for middleware ordering, `dispatch()`, custom terminals, extension state, retries, and more advanced extension patterns.
 
 ## Development
 
