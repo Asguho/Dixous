@@ -35,10 +35,10 @@ Define your client once. Add response methods, middleware, and typed options wit
 ```ts
 // lib/dixous.ts
 import { createDixous, defineExtension } from "dixous";
-import { parseXml } from "@asguho/xmlod";
+import { parseXml } from "schema-xml";
 import { z } from "zod";
 
-// Parse and validate XML with Xmlod.
+// Parse and validate XML with Schema XML.
 const xml = defineExtension({
   methods: {
     xml: (fetchResponse) =>
@@ -92,7 +92,7 @@ const result = await dixous.fetch("https://example.com/catalog", {
 console.log(result.catalog.book); // { title: string }[]
 ```
 
-The XML example uses [Xmlod](https://github.com/Asguho/xmlod) and Zod (`npm install @asguho/xmlod zod`). 
+The XML example uses [Schema XML](https://github.com/Asguho/schema-xml) and Zod (`npm install schema-xml zod`). 
 
 ## Development
 
