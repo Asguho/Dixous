@@ -1,8 +1,8 @@
 # Dixous
 
-A minimal, fully typed, extendable fetch client.
+A small, fully typed HTTP client built on Fetch.
 
-Start with a simple request, then add validation, middleware, and custom response handlers as you need them.
+Dixous gives you a simple request API, runtime-validated responses, and an extension system that can add new behavior and new APIs without losing type inference.
 
 ## Installation
 
@@ -10,46 +10,53 @@ Start with a simple request, then add validation, middleware, and custom respons
 npm install dixous
 ```
 
-## Usage
+## Quick start
 
 ```ts
 import { Dixous } from "dixous";
 import { z } from "zod";
 
-export const dixous = Dixous.create({
+const api = Dixous.create({
   baseUrl: "https://api.example.com/",
   headers: {
     Authorization: "Bearer YOUR_API_TOKEN",
   },
 });
 
-const image = await dixous
-  .request("https://example.com/image.png")
-  .blob();
-
 const User = z.object({
   id: z.number(),
   name: z.string(),
 });
 
-const user = await dixous
+const user = await api
   .request("users/1")
   .json(User);
 
-console.log(user.name); // string, validated at runtime
+console.log(user.name); // string
 ```
 
-Requests run when you call `.json(schema)`, `.text()`, `.blob()`, `.arrayBuffer()`, `.response()`, or another terminal added by an extension.
+The response is validated at runtime and inferred automatically from the schema.
 
-JSON accepts any Standard Schema v1 validator.
+Dixous works with any [Standard Schema](https://standardschema.dev/) validator.
 
-## Fully extensible
+## Why Dixous?
 
-Define your client once. Add response methods, middleware, and typed options with `defineExtension`.
+Dixous tries to stay small without becoming limiting.
+
+* Built around native `Request` and `Response`
+* Runtime validation with full TypeScript inference
+* Immutable clients that can be progressively specialized
+* Extensions can add middleware, configuration, client methods, and response methods
+* Features such as retrying, caching, logging, and custom formats do not need to be built into the core
+* Drop down to the native `Response` whenever you need to
+
+## Extend the API itself
+
+Extensions do more than run hooks. They can add completely new, fully typed APIs.
+
+For example, [Schema XML](https://github.com/Asguho/schema-xml) can make XML feel like a native Dixous response format:
 
 ```ts
-// lib/dixous.ts
-
 import {
   Dixous,
   defineExtension,
@@ -57,14 +64,13 @@ import {
 import { parseXml } from "schema-xml";
 import { z } from "zod";
 
-// Parse and validate XML with Schema XML.
 const xml = defineExtension({
   operation(operation) {
     return {
       xml: operation.terminal(
-        async <S extends z.ZodType>(
-          schema: S,
-        ): Promise<z.output<S>> => {
+        async <Schema extends z.ZodType>(
+          schema: Schema,
+        ): Promise<z.output<Schema>> => {
           const response =
             await operation.successfulResponse();
 
@@ -78,70 +84,9 @@ const xml = defineExtension({
   },
 });
 
-// Retry GET requests up to three times in total on a 503 response.
-const retry = defineExtension<{
-  retryAttempts?: number;
-}>()({
-  async middleware(context, dispatch) {
-    const attempts =
-      context.options.retryAttempts ?? 3;
-
-    for (let attempt = 1; ; attempt++) {
-      context.request.signal.throwIfAborted();
-
-      const response = await dispatch();
-
-      if (
-        context.request.method !== "GET" ||
-        response.status !== 503 ||
-        attempt >= attempts
-      ) {
-        return response;
-      }
-
-      await response.body?.cancel();
-    }
-  },
+const api = Dixous.create({
+  extensions: [xml],
 });
-
-// Add a typed query option.
-const query = defineExtension<{
-  query?: Record<string, string>;
-}>()({
-  async middleware(context, dispatch) {
-    const url = new URL(context.request.url);
-
-    for (
-      const [key, value]
-      of Object.entries(
-        context.options.query ?? {},
-      )
-    ) {
-      url.searchParams.append(key, value);
-    }
-
-    context.request =
-      new Request(url, context.request);
-
-    return dispatch();
-  },
-});
-
-export const dixous = Dixous.create({
-  extensions: [
-    xml,
-    query,
-    retry,
-  ],
-  retryAttempts: 3,
-});
-```
-
-Use the extended client anywhere:
-
-```ts
-import { dixous } from "./lib/dixous";
-import { z } from "zod";
 
 const Catalog = z.object({
   catalog: z.object({
@@ -153,30 +98,34 @@ const Catalog = z.object({
   }),
 });
 
-const result = await dixous
-  .request(
-    "https://example.com/catalog",
-    {
-      query: {
-        author: "Ursula K. Le Guin",
-      },
-    },
-  )
+const catalog = await api
+  .request("https://example.com/catalog.xml")
   .xml(Catalog);
 
-console.log(result.catalog.book);
+console.log(catalog.catalog.book);
 // { title: string }[]
 ```
 
-The XML example uses [Schema XML](https://github.com/Asguho/schema-xml) and Zod (`npm install schema-xml zod`).
+Dixous itself knows nothing about XML. The extension adds `.xml(schema)` to the client with the same type inference you would expect from a built-in API.
 
-See [Extensions](./docs/extensions.md) for middleware ordering, `dispatch()`, custom terminals, extension state, retries, and more advanced extension patterns.
-## Errors and raw responses
+```sh
+npm install schema-xml zod
+```
 
-Terminal methods reject like ordinary promises. If you prefer to handle failures as values, call `.result()` on the terminal:
+## Handle failures your way
+
+Use ordinary promise rejection:
 
 ```ts
-const result = await dixous
+const user = await api
+  .request("users/1")
+  .json(User);
+```
+
+Or turn the same operation into an explicit result:
+
+```ts
+const result = await api
   .request("users/1")
   .json(User)
   .result();
@@ -188,24 +137,78 @@ if (result.ok) {
 }
 ```
 
-`.result()` observes the same request invocation. It does not send the request again.
-
-Built-in body methods such as `.json()`, `.text()`, and `.blob()` expect a successful HTTP response. When the response status itself is part of your application logic, use `.response()` as the escape hatch:
+And when you want full control over HTTP semantics, use the native response:
 
 ```ts
-const response = await dixous
+const response = await api
   .request("users/1")
   .response();
 
 if (response.status === 404) {
-  // Handle an expected missing user.
-} else if (response.ok) {
-  const user = await response.json();
+  // Handle an expected 404.
 }
 ```
 
-`.response()` returns the native `Response` without applying an HTTP status policy, so responses such as `404`, `409`, and `500` are returned normally.
+## Typed extensions
 
+Extensions can contribute options as well as behavior.
+
+```ts
+const query = defineExtension<{
+  query?: Record<string, string>;
+}>()({
+  async middleware(context, dispatch) {
+    const url =
+      new URL(context.request.url);
+
+    for (
+      const [key, value]
+      of Object.entries(
+        context.options.query ?? {},
+      )
+    ) {
+      url.searchParams.append(
+        key,
+        value,
+      );
+    }
+
+    context.request =
+      new Request(
+        url,
+        context.request,
+      );
+
+    return dispatch();
+  },
+});
+```
+
+Install it:
+
+```ts
+const api = Dixous.create({
+  extensions: [query],
+});
+```
+
+And the option becomes part of the client:
+
+```ts
+const books = await api
+  .request("books", {
+    query: {
+      author: "Ursula K. Le Guin",
+    },
+  })
+  .json(Books);
+```
+
+Remove the extension and `query` disappears from the type.
+
+The same extension system can power retries, authentication, caching, logging, tracing, custom transports, custom response formats, and application-specific APIs.
+
+See [Extensions](./docs/extensions.md) for the full extension model and advanced patterns.
 
 ## Development
 
