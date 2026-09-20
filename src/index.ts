@@ -57,6 +57,23 @@ function runMiddleware(
 
 type Configuration = CoreOptions & RequestOptions & { readonly extensions?: readonly AnyExtension[] };
 
+function createOperation(context: OperationContext, extensions: readonly AnyExtension[]) {
+  const { response } = context;
+  const operation = Object.assign(Object.create(null), defaultOperationApi(context));
+  for (const extension of extensions) {
+    const contribution = extension.operation?.(context);
+    if (contribution !== undefined) {
+      if ("response" in contribution) throw new TypeError("Extension operation cannot replace response");
+      Object.assign(operation, contribution);
+    }
+  }
+  Object.defineProperties(operation, {
+    response: { value: response, enumerable: true },
+    then: { value: undefined },
+  });
+  return operation;
+}
+
 function createClient(parent: Configuration = {}, supplied: Configuration = {}): DixousClient {
   const { extensions: inherited = [], ...defaults } = parent;
   const { extensions: appended = [], ...overrides } = supplied;
@@ -68,13 +85,13 @@ function createClient(parent: Configuration = {}, supplied: Configuration = {}):
     // Capture contributions so later mutations cannot alter an immutable client.
     extensions: Object.freeze([...inherited, ...appended].map(entry => Object.freeze({ ...entry }))),
   });
-  const middleware = configuration.extensions.flatMap(entry => entry.request ? [entry.request] : []);
+  const { extensions, ...clientOptions } = configuration;
+  const middleware = extensions.flatMap(entry => entry.request ? [entry.request] : []);
   const transport = configuration.fetch ?? globalThis.fetch;
 
   return Object.freeze({
     create(options?: Configuration) { return createClient(configuration, options); },
     request(input: RequestInput, suppliedOptions: RequestOptions = {}) {
-      const { extensions: _, ...clientOptions } = configuration;
       const options = Object.freeze({
         ...clientOptions,
         ...suppliedOptions,
@@ -98,19 +115,7 @@ function createClient(parent: Configuration = {}, supplied: Configuration = {}):
       Object.defineProperties(context, {
         input: { writable: false }, options: { writable: false }, response: { writable: false },
       });
-      const operation = Object.assign(Object.create(null), defaultOperationApi(context));
-      for (const extension of configuration.extensions) {
-        const contribution = extension.operation?.(context);
-        if (contribution !== undefined) {
-          if ("response" in contribution) throw new TypeError("Extension operation cannot replace response");
-          Object.assign(operation, contribution);
-        }
-      }
-      Object.defineProperties(operation, {
-        response: { value: response, enumerable: true },
-        then: { value: undefined },
-      });
-      return operation;
+      return createOperation(context, extensions);
     },
   }) as DixousClient;
 }
