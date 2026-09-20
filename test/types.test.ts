@@ -104,3 +104,79 @@ const declared: Extension<{ label?: string }, { status(): Promise<number> }> = {
 Dixous.create({ extensions: [declared], label: "test" }).request("/").status();
 const issue: StandardSchemaIssue = { message: "bad", path: [Symbol(), { key: 1 }] };
 const result: StandardSchemaResult<number> = { issues: [issue] };
+
+// A Ky-style replacement removes the schema overload and retains its generic.
+const uncheckedJson = defineExtension({
+  operation: operation => ({
+    async json<T>(): Promise<T> { return (await operation.response()).json() as Promise<T>; },
+  }),
+});
+const kyStyle = api.create({ extensions: [uncheckedJson] }).create();
+const unchecked = kyStyle.request('/').json<{ name: string }>();
+type Unchecked = Expect<Equal<typeof unchecked, Promise<{ name: string }>>>;
+// @ts-expect-error The previous schema overload has been replaced.
+kyStyle.request('/').json(schema);
+// @ts-expect-error Default json has no unchecked output generic.
+defaults.json<{ name: string }>();
+const retainedText = kyStyle.request('/').text();
+type RetainedText = Expect<Equal<typeof retainedText, Promise<string>>>;
+const retainedDecoded = kyStyle.request('/').decoded(response => response.status);
+type RetainedDecoded = Expect<Equal<typeof retainedDecoded, Promise<number>>>;
+
+const tracing = defineExtension<{ trace?: string; config?: { enabled: boolean } }>()({
+  async request(context, next) {
+    const trace: string | undefined = context.options.trace;
+    const config: { enabled: boolean } | undefined = context.options.config;
+    return next();
+  },
+  operation: context => ({ trace: () => context.options.trace }),
+});
+const combined = Dixous.create({ extensions: [retry, tracing], attempts: 2,
+  trace: 'shared', config: { enabled: true },
+});
+const specialized = combined.create({ baseUrl: 'https://special.example/',
+  headers: { Authorization: 'special' }, trace: 'special', extensions: [uncheckedJson],
+}).create();
+const specializedOperation = specialized.request('/', { attempts: 1, trace: 'request' });
+type Trace = Expect<Equal<ReturnType<typeof specializedOperation.trace>, string | undefined>>;
+const specializedDecoded = specializedOperation.decoded(response => response.ok);
+type SpecializedDecoded = Expect<Equal<typeof specializedDecoded, Promise<boolean>>>;
+const specializedJson = specializedOperation.json<number>();
+type SpecializedJson = Expect<Equal<typeof specializedJson, Promise<number>>>;
+// @ts-expect-error Installing an unrelated extension does not introduce these options.
+api.request('/', { trace: 'missing extension' });
+// @ts-expect-error Client options require the extension too.
+Dixous.create({ trace: 'missing extension' });
+// @ts-expect-error Added methods are unavailable without their extension.
+base.request('/').trace();
+
+const replaceDecoded = defineExtension({ operation: () => ({ decoded: (value: string) => value.length }) });
+const replacedDecoded = specialized.create({ extensions: [replaceDecoded] }).request('/');
+const decodedLength = replacedDecoded.decoded('hello');
+type DecodedLength = Expect<Equal<typeof decodedLength, number>>;
+// @ts-expect-error The inherited generic signature is gone.
+replacedDecoded.decoded(response => response.status);
+// @ts-expect-error Replaced generic methods do not retain type parameters.
+replacedDecoded.decoded<number>('hello');
+
+const allDefaultsReplaced = defineExtension({ operation: () => ({
+  json: () => 1, text: () => false, blob: () => 'blob', arrayBuffer: () => null,
+  promiseLike: (): PromiseLike<number> => Promise.resolve(1),
+}) });
+const replacedDefaults = Dixous.create({ extensions: [allDefaultsReplaced] }).request('/');
+type RawResponseSurvives = Expect<Equal<ReturnType<typeof replacedDefaults.response>, Promise<Response>>>;
+type PromiseLikeResult = Expect<Equal<ReturnType<typeof replacedDefaults.promiseLike>, PromiseLike<number>>>;
+type ClientThen = Expect<Equal<typeof specialized.then, undefined>>;
+type OperationThen = Expect<Equal<typeof specializedOperation.then, undefined>>;
+
+const invalidDeclared: Extension<{}, { response(): Promise<Response> }> = {
+  // @ts-expect-error Reserved response cannot be supplied using an explicit extension type.
+  operation: () => ({ response: async () => new Response() }),
+};
+// @ts-expect-error Reserved response cannot bypass defineExtension through inline installation.
+Dixous.create({ extensions: [{ operation: () => ({ response: async () => new Response() }) }] });
+// @ts-expect-error Derived clients enforce the same reservation for inline extensions.
+api.create({ extensions: [{ operation: () => ({ response: () => 1 }) }] });
+const invalidInline = { operation: () => ({ response: async () => new Response() }) };
+// @ts-expect-error Naming an inline extension does not bypass the reservation.
+Dixous.create({ extensions: [invalidInline] });

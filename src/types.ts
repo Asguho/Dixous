@@ -70,7 +70,13 @@ export interface CoreOptions {
 }
 
 export type CreateOptions<CurrentOptions extends object, Extensions extends readonly AnyExtension[]> =
-  { readonly extensions?: Extensions } &
+  { readonly extensions?: Extensions & NoInfer<{
+    // Validate inline contributions too; erased APIs retain runtime validation.
+    [Index in keyof Extensions]: unknown extends ReturnType<NonNullable<Extensions[Index]["operation"]>>
+      ? Extensions[Index]
+      : "response" extends keyof ReturnType<NonNullable<Extensions[Index]["operation"]>>
+        ? never : Extensions[Index];
+  }> } &
   CoreOptions & {
     // Materialize the fold so inline extension arrays retain tuple inference.
     [Key in keyof ApplyExtensionOptions<CurrentOptions, Extensions>]:
