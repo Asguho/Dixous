@@ -1,113 +1,64 @@
-import assert from "node:assert/strict";
-import test from "node:test";
-import { createDixous, defineExtension, HttpError, SchemaValidationError } from "../dist/index.js";
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { Dixous, defineExtension, UnexpectedResponseError, ResponseValidationError } from '../dist/index.js';
 
-const url = "https://example.com/resource";
-const schema = validate => ({ "~standard": { version: 1, vendor: "test", validate } });
+const url = 'https://example.com/';
+const schema = validate => ({ '~standard': { version: 1, vendor: 'test', validate } });
+const operation = response => Dixous.create({ fetch: async () => response }).request(url);
 
-test("default body methods execute independent operations and preserve native results", async () => {
-  const responses = [];
-  const dixous = createDixous({ fetch: async () => {
-    const response = new Response("hello", { headers: { "content-type": "text/plain" } });
-    responses.push(response);
-    return response;
-  } });
-  const pending = dixous({ baseUrl: "https://example.com" }).fetch("/resource");
-  assert.equal(responses.length, 0);
-  assert.equal(await pending.text(), "hello");
-  const blob = await pending.blob();
-  assert.ok(blob instanceof Blob);
-  assert.equal(blob.type, "text/plain");
-  assert.equal(await blob.text(), "hello");
-  const buffer = await pending.arrayBuffer();
-  assert.ok(buffer instanceof ArrayBuffer);
-  assert.equal(new TextDecoder().decode(buffer), "hello");
-  const response = await pending.response();
-  assert.equal(response, responses[3]);
-  assert.equal(response.bodyUsed, false);
-  assert.equal(await response.text(), "hello");
-  assert.equal(await pending.text(), "hello");
-  assert.equal(responses.length, 5);
+test('response returns non-OK native responses; default body helpers enforce status', async () => {
+  for (const method of ['json', 'text', 'blob', 'arrayBuffer']) {
+    const response = new Response('error', { status: 403 });
+    const pending = operation(response);
+    assert.equal(await pending.response(), response);
+    await assert.rejects(pending[method](schema(() => { throw new Error('must not validate'); })), error => {
+      assert.ok(error instanceof UnexpectedResponseError);
+      assert.equal(error.name, 'UnexpectedResponseError');
+      assert.equal(error.response, response);
+      assert.equal(error.request.url, url);
+      assert.equal(response.bodyUsed, false);
+      return true;
+    });
+  }
 });
 
-test("JSON validates parsed data and returns transformed synchronous or asynchronous output", async () => {
-  const dixous = createDixous({ fetch: async () => new Response('{"count":"42"}') });
-  const pending = dixous.fetch(url);
-  const sync = schema(input => {
-    assert.deepEqual(input, { count: "42" });
-    return { value: { count: Number(input.count) } };
-  });
-  const asyncSchema = schema(async input => ({ value: Number(input.count) }));
-  assert.deepEqual(await pending.json(sync), { count: 42 });
-  assert.equal(await pending.json(asyncSchema), 42);
-  assert.equal(await pending.json(schema(() => ({ value: undefined }))), undefined);
+test('default readers retain native body behavior', async () => {
+  assert.equal(await operation(new Response('text')).text(), 'text');
+  assert.equal(await (await operation(new Response('blob')).blob()).text(), 'blob');
+  assert.equal(new TextDecoder().decode(await operation(new Response('buffer')).arrayBuffer()), 'buffer');
+  const pending = operation(new Response('once'));
+  await (await pending.response()).text();
+  await assert.rejects(pending.text(), TypeError);
 });
 
-test("validation errors preserve all Standard Schema issues including paths", async () => {
-  const issues = [
-    { message: "Expected number", path: [{ key: "count" }] },
-    { message: "Missing name", path: ["name"] },
-  ];
-  const dixous = createDixous({ fetch: async () => new Response("{}") });
-  for (const validate of [() => ({ issues }), async () => ({ issues })]) {
-    await assert.rejects(dixous.fetch(url).json(schema(validate)), error => {
-      assert.ok(error instanceof SchemaValidationError);
-      assert.equal(error.name, "SchemaValidationError");
+test('JSON validates synchronously or asynchronously and returns transformed output', async () => {
+  for (const asyncValidation of [false, true]) {
+    const validate = value => ({ value: { count: Number(value.count) } });
+    const validator = schema(asyncValidation ? async value => validate(value) : validate);
+    assert.deepEqual(await operation(Response.json({ count: '3' })).json(validator), { count: 3 });
+  }
+});
+
+test('validation errors retain issues, final request, and native response', async () => {
+  for (const issues of [[], [{ message: 'invalid', path: ['count', { key: 0 }] }]]) {
+    const response = Response.json({ count: false });
+    const request = new Request(`${url}replacement`);
+    const pending = Dixous.create({ fetch: async () => response, extensions: [defineExtension({ async request(context, next) { context.request = request; return next(); } })] }).request(url);
+    await assert.rejects(pending.json(schema(async () => ({ issues }))), error => {
+      assert.ok(error instanceof ResponseValidationError);
+      assert.equal(error.name, 'ResponseValidationError');
+      assert.equal(error.request, request);
+      assert.equal(error.response, response);
       assert.equal(error.issues, issues);
       return true;
     });
   }
-  // A failure result remains a failure even if its issues array is empty.
-  await assert.rejects(dixous.fetch(url).json(schema(() => ({ issues: [] }))), SchemaValidationError);
 });
 
-test("native JSON errors and thrown or rejected validator errors propagate unchanged", async () => {
-  let validated = false;
-  const invalid = createDixous({ fetch: async () => new Response("not JSON") });
-  await assert.rejects(invalid.fetch(url).json(schema(value => {
-    validated = true;
-    return { value };
-  })), SyntaxError);
-  assert.equal(validated, false);
-
-  const failure = new Error("validator failed");
-  const valid = createDixous({ fetch: async () => new Response("{}") });
-  for (const validate of [() => { throw failure; }, async () => { throw failure; }]) {
-    await assert.rejects(valid.fetch(url).json(schema(validate)), error => error === failure);
+test('schema exceptions and platform errors are preserved', async () => {
+  const error = new Error('schema bug');
+  for (const validate of [() => { throw error; }, async () => { throw error; }]) {
+    await assert.rejects(operation(Response.json({})).json(schema(validate)), value => value === error);
   }
-});
-
-test("every default method passes through the HTTP status gate before reading the body", async () => {
-  let validated = false;
-  const validator = schema(value => { validated = true; return { value }; });
-  for (const method of ["json", "text", "blob", "arrayBuffer", "response"]) {
-    const response = new Response("not JSON", { status: 503 });
-    const dixous = createDixous({ fetch: async () => response });
-    const pending = dixous.fetch(url);
-    const operation = method === "json" ? pending.json(validator) : pending[method]();
-    await assert.rejects(operation, error => error instanceof HttpError && error.response === response);
-    assert.equal(response.bodyUsed, false);
-  }
-  assert.equal(validated, false);
-});
-
-test("default JSON parsing and validation happen after middleware fully unwinds", async () => {
-  const events = [];
-  const response = new Response("{}");
-  const parse = response.json.bind(response);
-  response.json = () => { events.push("parse"); return parse(); };
-  const dixous = createDixous({
-    extensions: [defineExtension({ request: async (_, next) => {
-      events.push("before");
-      try { return await next(); }
-      catch (error) { events.push("caught"); throw error; }
-      finally { events.push("after"); }
-    } })],
-    fetch: async () => { events.push("transport"); return response; },
-  });
-  await assert.rejects(dixous.fetch(url).json(schema(async () => {
-    events.push("validate");
-    return { issues: [{ message: "invalid" }] };
-  })), SchemaValidationError);
-  assert.deepEqual(events, ["before", "transport", "after", "parse", "validate"]);
+  await assert.rejects(operation(new Response('bad json')).json(schema(value => ({ value }))), SyntaxError);
 });

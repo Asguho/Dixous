@@ -18,12 +18,13 @@ try {
   run(join(root, 'node_modules/.bin/tsc'), ['--noEmit', '--strict', '--exactOptionalPropertyTypes', '--noUncheckedIndexedAccess', '--target', 'ES2022', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', 'types.test.ts'], consumer);
   writeFileSync(join(consumer, 'smoke.mjs'), `
 import assert from 'node:assert/strict';
-import { createDixous, defineExtension, HttpError, SchemaValidationError } from 'dixous';
-const client = createDixous({ fetch: async () => new Response('packed package') });
-assert.equal(await client.fetch('https://example.com').text(), 'packed package');
+import { Dixous, defineExtension, UnexpectedResponseError, ResponseValidationError, ConcurrentNextError } from 'dixous';
+const client = Dixous.create({ fetch: async () => new Response('packed package') });
+assert.equal(await client.request('https://example.com').text(), 'packed package');
 assert.equal(typeof defineExtension, 'function');
-assert.ok(HttpError.prototype instanceof Error);
-assert.ok(SchemaValidationError.prototype instanceof Error);
+assert.ok(UnexpectedResponseError.prototype instanceof Error);
+assert.ok(ResponseValidationError.prototype instanceof Error);
+assert.ok(ConcurrentNextError.prototype instanceof Error);
 `);
   run('node', ['smoke.mjs'], consumer);
   const installed = JSON.parse(readFileSync(join(consumer, 'node_modules/dixous/package.json'), 'utf8'));

@@ -1,10 +1,7 @@
 # Dixous
 
-A small, fully typed HTTP client built on Fetch.
-
-Dixous gives you a simple request API, runtime-validated responses, and an
-extension system that can add new behavior and new APIs without losing type
-inference.
+A small, typed HTTP client built on native Fetch, with lazy operations,
+Standard Schema validation, and composable extensions.
 
 ## Installation
 
@@ -20,180 +17,137 @@ import { z } from "zod";
 
 const api = Dixous.create({
   baseUrl: "https://api.example.com/",
-  headers: {
-    Authorization: "Bearer YOUR_API_TOKEN",
-  },
+  headers: { Authorization: "Bearer YOUR_API_TOKEN" },
 });
 
-const User = z.object({
-  id: z.number(),
-  name: z.string(),
-});
-
+const User = z.object({ id: z.number(), name: z.string() });
 const user = await api.request("users/1").json(User);
-
 console.log(user.name); // string
 ```
 
-The response is validated at runtime and inferred automatically from the schema.
+`json(schema)` supports Standard Schema v1 validators and infers the schema's
+output, including transformations. The other default helpers are `text()`,
+`blob()`, and `arrayBuffer()`.
 
-Dixous works with any [Standard Schema](https://standardschema.dev/) validator.
+## One operation, one execution
 
-## Why Dixous?
+`request()` constructs a native `Request` immediately. Network execution starts
+when a helper calls `response()`. All helpers on that operation share one
+memoized execution, including failures:
 
-Dixous tries to stay small without becoming limiting.
+```ts
+const operation = api.request("users/1");
+const response = await operation.response();
+const sameResponse = await operation.response(); // same Response; no new request
+```
 
-- Built around native `Request` and `Response`
-- Runtime validation with full TypeScript inference
-- Immutable clients that can be progressively specialized
-- Extensions can add middleware, configuration, client methods, and response
-  methods
-- Features such as retrying, caching, logging, and custom formats do not need to
-  be built into the core
-- Drop down to the native `Response` whenever you need to
+Clients and operations are not thenable. Await an operation's helper to execute
+it. Call `request()` again for an independent operation.
 
-## Extend the API itself
+Bodies retain native one-shot semantics: Dixous does not clone or buffer requests
+or responses. Reading a response body twice fails as it would with native Fetch.
 
-Extensions do more than run hooks. They can add completely new, fully typed
-APIs.
+`response()` returns any HTTP status without imposing a status policy. The four
+default body helpers require `response.ok` and throw `UnexpectedResponseError`
+otherwise. This error includes `request` and `response`.
 
-For example, [Schema XML](https://github.com/Asguho/schema-xml) can make XML
-feel like a native Dixous response format:
+`json(schema)` throws `ResponseValidationError` when validation returns issues.
+It includes `request`, `response`, and the original `issues`. Platform errors and
+errors thrown or rejected by validators are preserved.
+
+## Derive clients
+
+```ts
+const authenticated = api.create({
+  headers: { Authorization: "Bearer NEW_TOKEN" },
+});
+
+await authenticated.request("users/1", {
+  headers: { "X-Trace": "example" },
+}).json(User);
+```
+
+Derived clients inherit configuration and extensions without mutating the parent.
+Supplied values replace inherited values, headers merge by name, and extensions
+append in order. At request construction, headers merge in this order: client
+defaults, input `Request` headers, then request options.
+
+String and URL inputs resolve against `baseUrl` using native WHATWG URL semantics.
+A `Request` input keeps its own URL. Supply `fetch` to replace the transport.
+
+## Typed request middleware
 
 ```ts
 import { Dixous, defineExtension } from "dixous";
-import { parseXml } from "schema-xml";
-import { z } from "zod";
 
-const xml = defineExtension({
+const query = defineExtension<{
+  query?: Record<string, string>;
+}>()({
+  async request(context, next) {
+    const url = new URL(context.request.url);
+    for (const [key, value] of Object.entries(context.options.query ?? {})) {
+      url.searchParams.set(key, value);
+    }
+    context.request = new Request(url, context.request);
+    return next();
+  },
+});
+
+const api = Dixous.create({
+  baseUrl: "https://api.example.com/",
+  extensions: [query],
+  query: { language: "en" },
+});
+
+const response = await api.request("books", {
+  query: { author: "Ursula K. Le Guin" },
+}).response();
+```
+
+Extension options are available directly on both client and request options.
+`context.options` is a shallow readonly snapshot of their effective values.
+`context.input` always refers to the original input; replacing `context.request`
+does not change either `input` or `options`.
+
+Middleware runs in extension order with onion semantics: A before, B before,
+transport, B after, A after. It can return a response without calling `next()`.
+Each sequential call to `next()` reruns all remaining middleware and can perform
+another transport attempt. Concurrent calls to the same continuation reject with
+`ConcurrentNextError`. Retry middleware must provide a replayable request itself.
+
+## Extend operation methods
+
+```ts
+const status = defineExtension({
   operation(operation) {
     return {
-      xml: operation.terminal(
-        async <Schema extends z.ZodType>(schema: Schema): Promise<z.output<Schema>> => {
-          const response = await operation.successfulResponse();
-
-          return parseXml(await response.text(), schema);
-        },
-      ),
+      async status() {
+        return (await operation.response()).status;
+      },
     };
   },
 });
 
-const api = Dixous.create({
-  extensions: [xml],
-});
-
-const Catalog = z.object({
-  catalog: z.object({
-    book: z.array(
-      z.object({
-        title: z.string(),
-      }),
-    ),
-  }),
-});
-
-const catalog = await api
-  .request("https://example.com/catalog.xml")
-  .xml(Catalog);
-
-console.log(catalog.catalog.book);
-// { title: string }[]
+const withStatus = api.create({ extensions: [status] });
+const code = await withStatus.request("health").status(); // number
 ```
 
-Dixous itself knows nothing about XML. The extension adds `.xml(schema)` to the
-client with the same type inference you would expect from a built-in API.
+Each operation factory runs once when `request()` is called. Its context includes
+`input`, the replaceable `request`, `options`, and the memoized `response()`.
+Custom helpers decide their own status policy.
 
-```sh
-npm install schema-xml zod
-```
-
-## Handle failures your way
-
-Use ordinary promise rejection:
-
-```ts
-const user = await api.request("users/1").json(User);
-```
-
-Or turn the same operation into an explicit result:
-
-```ts
-const result = await api.request("users/1").json(User).result();
-
-if (result.ok) {
-  console.log(result.value.name);
-} else {
-  console.error(result.error);
-}
-```
-
-And when you want full control over HTTP semantics, use the native response:
-
-```ts
-const response = await api.request("users/1").response();
-
-if (response.status === 404) {
-  // Handle an expected 404.
-}
-```
-
-## Typed extensions
-
-Extensions can contribute options as well as behavior.
-
-```ts
-const query = defineExtension<{
-  query?: Record<string, string>;
-}>()({
-  async middleware(context, dispatch) {
-    const url = new URL(context.request.url);
-
-    for (const [key, value] of Object.entries(context.options.query ?? {})) {
-      url.searchParams.append(key, value);
-    }
-
-    context.request = new Request(url, context.request);
-
-    return dispatch();
-  },
-});
-```
-
-Install it:
-
-```ts
-const api = Dixous.create({
-  extensions: [query],
-});
-```
-
-And the option becomes part of the client:
-
-```ts
-const books = await api
-  .request("books", {
-    query: {
-      author: "Ursula K. Le Guin",
-    },
-  })
-  .json(Books);
-```
-
-Remove the extension and `query` disappears from the type.
-
-The same extension system can power retries, authentication, caching, logging,
-tracing, custom transports, custom response formats, and application-specific
-APIs.
-
-See [Extensions](./docs/extensions.md) for the full extension model and advanced
-patterns.
+Later extensions replace earlier operation methods, including default body
+helpers. Type composition follows the same order for methods and options.
+`response` is reserved and cannot be replaced. Operations always remain
+non-thenable. For extension lists stored in a variable, use `as const` to preserve
+ordered tuple inference.
 
 ## Development
 
 ```sh
 npm ci
 npm test
+npm run test:package
 ```
 
 See [RELEASING.md](./RELEASING.md) for npm and JSR publishing.

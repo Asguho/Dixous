@@ -1,141 +1,107 @@
-declare const contextKeyType: unique symbol;
+import type { InferOutput, StandardSchemaV1 } from "./standard-schema.ts";
 
-export type ContextKey<T> = symbol & {
-  readonly [contextKeyType]: (value: T) => T;
-};
+export type RequestInput = string | URL | Request;
+export type RequestOptions<Options extends object = {}> = RequestInit & Options;
 
-export interface Context {
-  get<T>(key: ContextKey<T>): T | undefined;
-  set<T>(key: ContextKey<T>, value: T): void;
-}
-
-export type RequestOptions<Extra extends object = {}> = RequestInit & Extra;
-
-export interface BaseClientOptions {
-  baseUrl?: string | URL;
-  headers?: HeadersInit;
-}
-
-export type ClientOptions<Extra extends object = {}> = BaseClientOptions & Extra;
-
-export interface RequestContext<
-  RequestExtra extends object = {},
-  ClientExtra extends object = {},
-> {
+export interface RequestContext<Options extends object = {}> {
+  /** Exact original input, even when middleware replaces request. */
+  readonly input: RequestInput;
+  /** Request used by the next execution step; middleware may replace it. */
   request: Request;
-  readonly options: Readonly<RequestOptions<RequestExtra>>;
-  readonly client: Readonly<ClientOptions<ClientExtra>>;
-  readonly state: Context;
+  /** Shallow readonly snapshot of effective client and request options. */
+  readonly options: Readonly<RequestOptions<Options>>;
 }
 
+/**
+ * Reruns the remaining chain. Sequential calls are allowed; concurrent calls
+ * reject. Dixous does not clone or buffer bodies: callers must ensure replayability.
+ */
 export type Next = () => Promise<Response>;
-
-export type Middleware<
-  RequestExtra extends object = {},
-  ClientExtra extends object = {},
-> = (
-  context: RequestContext<RequestExtra, ClientExtra>,
-  next: Next,
+export type RequestMiddleware<Options extends object = {}> = (
+  context: RequestContext<Options>, next: Next,
 ) => Promise<Response>;
 
-export type FetchResponse = () => Promise<Response>;
+export interface OperationContext<Options extends object = {}> extends RequestContext<Options> {
+  /** Memoized logical execution. The native response body remains one-shot. */
+  response(): Promise<Response>;
+}
 
-export type ResponseMethod = (
-  fetchResponse: FetchResponse,
-) => (...args: never[]) => Promise<unknown>;
+/** Default body readers require response.ok; schema/platform errors are preserved. */
+export interface DefaultOperationApi {
+  json<Schema extends StandardSchemaV1>(schema: Schema): Promise<InferOutput<Schema>>;
+  text(): Promise<string>;
+  blob(): Promise<Blob>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
 
-export type ResponseMethods = Record<string, ResponseMethod>;
-
-type InstantiateMethods<Methods extends ResponseMethods> = {
-  readonly [K in keyof Methods]: ReturnType<Methods[K]>;
-};
+export type RequestOperation<OperationApi extends object = DefaultOperationApi> =
+  OperationApi & {
+    /** Returns the native response without applying a status policy. */
+    readonly response: () => Promise<Response>;
+    readonly then?: never;
+  };
 
 declare const extensionType: unique symbol;
 
-export interface ExtensionMeta {
-  readonly [extensionType]: {
-    request: object;
-    client: object;
-    methods: ResponseMethods;
+export interface ExtensionDefinition<Options extends object, OperationApi extends object> {
+  /** Runs in extension order with onion semantics. */
+  readonly request?: RequestMiddleware<Options>;
+  /** Created once per operation. Later contributions replace earlier methods. */
+  readonly operation?: (
+    operation: OperationContext<Options>,
+  ) => OperationApiContribution<OperationApi>;
+}
+
+export type Extension<Options extends object = {}, OperationApi extends object = {}> =
+  ExtensionDefinition<Options, OperationApi> & {
+    readonly [extensionType]?: {
+      readonly options: Options;
+      readonly operationApi: OperationApi;
+    };
   };
+
+export interface CoreOptions {
+  /** Resolves string and URL inputs using native WHATWG URL semantics. */
+  readonly baseUrl?: string | URL;
+  /** Defaults merged by header name in derived clients and requests. */
+  readonly headers?: HeadersInit;
+  /** Defaults to globalThis.fetch. */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
-export interface Extension<
-  RequestExtra extends object = {},
-  ClientExtra extends object = {},
-  Methods extends ResponseMethods = {},
-> {
-  readonly [extensionType]: {
-    request: RequestExtra;
-    client: ClientExtra;
-    methods: Methods;
+export type CreateOptions<CurrentOptions extends object, Extensions extends readonly AnyExtension[]> =
+  { readonly extensions?: Extensions } &
+  CoreOptions & {
+    // Materialize the fold so inline extension arrays retain tuple inference.
+    [Key in keyof ApplyExtensionOptions<CurrentOptions, Extensions>]:
+      ApplyExtensionOptions<CurrentOptions, Extensions>[Key];
   };
-  request?: Middleware<RequestExtra, ClientExtra>;
-  methods?: Methods;
+
+export interface Dixous<Options extends object = {}, OperationApi extends object = DefaultOperationApi> {
+  /** Constructs a Request immediately; execution waits until response() is called. */
+  request(input: RequestInput, options?: RequestOptions<Options>): RequestOperation<OperationApi>;
+  /** Inherits configuration, merges headers, appends extensions; never mutates the parent. */
+  create<const Extensions extends readonly AnyExtension[] = []>(
+    options?: CreateOptions<Options, Extensions>,
+  ): Dixous<ApplyExtensionOptions<Options, Extensions>, ApplyExtensionApi<OperationApi, Extensions>>;
+  readonly then?: never;
 }
 
-export type ExtensionDefinition<
-  RequestExtra extends object,
-  ClientExtra extends object,
-  Methods extends ResponseMethods,
-> = Pick<Extension<RequestExtra, ClientExtra, Methods>, "request"> & {
-  // Contextually type factory parameters while preserving each method's signature.
-  methods?: Methods & Record<string, (fetchResponse: FetchResponse) => unknown>;
-};
+export type AnyExtension = Extension<any, any>;
 
-export type NoRequestInitOverrides = {
-  [K in keyof RequestInit]?: never;
-};
+// AnyExtension erases the API for composition; concrete APIs still reserve response.
+type OperationApiContribution<Api extends object> =
+  unknown extends Api ? Api : "response" extends keyof Api ? never : Api;
+type ExtensionOptions<E extends AnyExtension> = E extends Extension<infer Options, any> ? Options : {};
+type ExtensionOperationApi<E extends AnyExtension> = E extends Extension<any, infer Api> ? Api : {};
+type Merge<Left extends object, Right extends object> = Omit<Left, keyof Right> & Right;
 
-export type NoClientOptionOverrides = {
-  [K in keyof BaseClientOptions]?: never;
-};
+export type ApplyExtensionOptions<Current extends object, Extensions extends readonly AnyExtension[]> =
+  Extensions extends readonly [infer Head extends AnyExtension, ...infer Tail extends readonly AnyExtension[]]
+    ? ApplyExtensionOptions<Merge<Current, ExtensionOptions<Head>>, Tail>
+    : Current;
 
-type UnionToIntersection<T> = [T] extends [never]
-  ? {}
-  : (T extends unknown ? (value: T) => void : never) extends (
-        value: infer Result,
-      ) => void
-    ? Result
-    : never;
-
-export type ExtensionRequestOptions<
-  Extensions extends readonly ExtensionMeta[],
-> = UnionToIntersection<
-  Extensions[number][typeof extensionType]["request"]
-> extends infer Result extends object
-  ? Result
-  : never;
-
-export type ExtensionClientOptions<
-  Extensions extends readonly ExtensionMeta[],
-> = UnionToIntersection<
-  Extensions[number][typeof extensionType]["client"]
-> extends infer Result extends object
-  ? Result
-  : never;
-
-export type ExtensionMethods<Extensions extends readonly ExtensionMeta[]> =
-  UnionToIntersection<
-    Extensions[number][typeof extensionType]["methods"]
-  > extends infer Result extends ResponseMethods
-    ? Result
-    : never;
-
-export interface Fetcher<
-  RequestExtra extends object,
-  Methods extends ResponseMethods,
-> {
-  fetch(
-    input: string | URL | Request,
-    options?: RequestOptions<RequestExtra>,
-  ): InstantiateMethods<Methods>;
-}
-
-export interface Dixous<
-  RequestExtra extends object,
-  ClientExtra extends object,
-  Methods extends ResponseMethods,
-> extends Fetcher<RequestExtra, Methods> {
-  (options?: ClientOptions<ClientExtra>): Fetcher<RequestExtra, Methods>;
-}
+export type ApplyExtensionApi<Current extends object, Extensions extends readonly AnyExtension[]> =
+  Extensions extends readonly [infer Head extends AnyExtension, ...infer Tail extends readonly AnyExtension[]]
+    ? ApplyExtensionApi<Merge<Current, ExtensionOperationApi<Head>>, Tail>
+    : Current;

@@ -1,36 +1,25 @@
-import type { StandardSchemaV1 } from "./standard-schema.ts";
-import type { FetchResponse, ResponseMethods } from "./types.ts";
+import { ResponseValidationError, UnexpectedResponseError } from "./errors.ts";
+import type { InferOutput, StandardSchemaV1 } from "./standard-schema.ts";
+import type { DefaultOperationApi, OperationContext } from "./types.ts";
 
-export type InferOutput<Schema extends StandardSchemaV1> =
-  StandardSchemaV1.InferOutput<Schema>;
-
-export class SchemaValidationError extends Error {
-  readonly issues: readonly StandardSchemaV1.Issue[];
-
-  constructor(issues: readonly StandardSchemaV1.Issue[]) {
-    super("Response failed schema validation");
-    this.name = "SchemaValidationError";
-    this.issues = issues;
+export function defaultOperationApi(operation: OperationContext): DefaultOperationApi {
+  async function successfulResponse(): Promise<Response> {
+    const response = await operation.response();
+    if (!response.ok) throw new UnexpectedResponseError(operation.request, response);
+    return response;
   }
-}
 
-// Built-ins use the same per-operation factories as extension methods.
-export const defaultResponseMethods = {
-  json: (fetchResponse: FetchResponse) =>
-    async <Schema extends StandardSchemaV1>(schema: Schema): Promise<InferOutput<Schema>> => {
-      const response = await fetchResponse();
+  return {
+    async json<Schema extends StandardSchemaV1>(schema: Schema): Promise<InferOutput<Schema>> {
+      const response = await successfulResponse();
       const result = await schema["~standard"].validate(await response.json());
-      if (result.issues) throw new SchemaValidationError(result.issues);
+      if (result.issues !== undefined) {
+        throw new ResponseValidationError(operation.request, response, result.issues);
+      }
       return result.value as InferOutput<Schema>;
     },
-  text: (fetchResponse: FetchResponse) => async (): Promise<string> =>
-    (await fetchResponse()).text(),
-  blob: (fetchResponse: FetchResponse) => async (): Promise<Blob> =>
-    (await fetchResponse()).blob(),
-  arrayBuffer: (fetchResponse: FetchResponse) => async (): Promise<ArrayBuffer> =>
-    (await fetchResponse()).arrayBuffer(),
-  response: (fetchResponse: FetchResponse) => (): Promise<Response> =>
-    fetchResponse(),
-} satisfies ResponseMethods;
-
-export type DefaultResponseMethods = typeof defaultResponseMethods;
+    async text() { return (await successfulResponse()).text(); },
+    async blob() { return (await successfulResponse()).blob(); },
+    async arrayBuffer() { return (await successfulResponse()).arrayBuffer(); },
+  };
+}
