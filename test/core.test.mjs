@@ -28,7 +28,7 @@ test('operations construct requests eagerly and execute once, lazily', async () 
   assert.equal(calls, 0);
   const first = operation.response();
   assert.equal(first, operation.response());
-  assert.equal(first, context.response());
+  assert.equal(await context.response(), response);
   assert.equal(await first, response);
   assert.equal(await operation.status(), 200);
   assert.equal(await operation.text(), 'body');
@@ -179,8 +179,8 @@ test('operation factories compose once in order, with later overrides and symbol
   assert.throws(() => { operation.response = () => {}; }, TypeError);
   const invalid = Dixous.create({ extensions: [{ operation: () => ({ response: () => {} }) }] });
   assert.throws(() => invalid.request(url), /cannot replace response/);
-  const then = Dixous.create({ extensions: [{ operation: () => ({ then: () => { throw new Error('thenable'); } }) }] }).request(url);
-  assert.equal(await Promise.resolve(then), then);
+  const thenable = Dixous.create({ extensions: [{ operation: () => ({ then: () => {} }) }] });
+  assert.throws(() => thenable.request(url), /cannot replace then/);
 });
 
 test('native URL resolution, abort signals, and derived transports', async () => {

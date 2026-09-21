@@ -20,6 +20,8 @@ const retry = defineExtension<{ attempts?: number }>()({
   },
   operation(operation) {
     type Context = Expect<Equal<typeof operation, OperationContext<{ attempts?: number }>>>;
+    // @ts-expect-error Operation methods only observe the request.
+    operation.request = new Request(operation.request);
     return {
       async decoded<T>(decode: (response: Response) => T): Promise<T> {
         return decode(await operation.response());
@@ -68,6 +70,35 @@ type Final = Expect<Equal<typeof finalResult, true>>;
 defineExtension({ operation: () => ({ response: async () => new Response() }) });
 // @ts-expect-error response is also reserved on curried definitions.
 defineExtension<{ label?: string }>()({ operation: () => ({ response: () => 1 }) });
+// @ts-expect-error then is reserved.
+defineExtension({ operation: () => ({ then: () => 1 }) });
+// @ts-expect-error Reserved keys are rejected on inline contributions too.
+Dixous.create({ extensions: [{ operation: () => ({ then: () => 1 }) }] });
+
+declare const User: StandardSchemaV1<unknown, { id: number; name: string }>;
+declare const ValidationError: StandardSchemaV1<unknown, { errors: string[] }>;
+const matched = api.request("users/1").match({
+  200: operation => operation.json(User),
+  400: operation => operation.json(ValidationError),
+  404: operation => operation.text(),
+  410: operation => operation.decoded(response => response.status),
+});
+type Matched = Expect<Equal<
+  typeof matched,
+  Promise<{ id: number; name: string } | { errors: string[] } | string | number>
+>>;
+api.request("/").match({
+  // @ts-expect-error Matched operations cannot match again.
+  200: operation => operation.match({}),
+});
+// @ts-expect-error Handlers receive the operation API.
+api.request("/").match({ 200: (operation: string) => operation });
+// @ts-expect-error Keys are numeric statuses.
+api.request("/").match({ ok: operation => operation.text() });
+// A replaced match keeps its own signature; a compatible one is bound to the final API.
+const ranged = defineExtension({ operation: () => ({ match: (range: `${number}xx`) => range.length }) });
+const rangedMatch = api.create({ extensions: [ranged] }).request("/").match("4xx");
+type RangedMatch = Expect<Equal<typeof rangedMatch, number>>;
 
 const base: Dixous = Dixous.create();
 const defaults: RequestOperation<DefaultOperationApi> = base.request("https://example.com");
@@ -118,6 +149,8 @@ type Unchecked = Expect<Equal<typeof unchecked, Promise<{ name: string }>>>;
 kyStyle.request('/').json(schema);
 // @ts-expect-error Default json has no unchecked output generic.
 defaults.json<{ name: string }>();
+const kyMatch = kyStyle.request("/").match({ 200: operation => operation.json<{ name: string }>() });
+type KyMatch = Expect<Equal<typeof kyMatch, Promise<{ name: string }>>>;
 const retainedText = kyStyle.request('/').text();
 type RetainedText = Expect<Equal<typeof retainedText, Promise<string>>>;
 const retainedDecoded = kyStyle.request('/').decoded(response => response.status);

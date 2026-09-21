@@ -1,18 +1,19 @@
-import { ConcurrentNextError } from "./errors.ts";
+import { ConcurrentNextError, UnexpectedResponseError } from "./errors.ts";
 import { defaultOperationApi } from "./response-methods.ts";
 import type {
   AnyExtension, ApplyExtensionApi, ApplyExtensionOptions, CoreOptions, CreateOptions,
   DefaultOperationApi, Dixous as DixousClient, Extension,
   ExtensionDefinition, OperationContext, RequestContext, RequestInput,
-  RequestMiddleware, RequestOptions,
+  MatchedOperation, RequestMiddleware, RequestOptions, ReservedOperationKey,
 } from "./types.ts";
 
 export { ConcurrentNextError, ResponseValidationError, UnexpectedResponseError } from "./errors.ts";
 export type { InferOutput, StandardSchemaIssue, StandardSchemaResult, StandardSchemaV1 } from "./standard-schema.ts";
 export type {
   AnyExtension, CoreOptions, CreateOptions, DefaultOperationApi, Extension,
-  ExtensionDefinition, Next, OperationContext, RequestContext, RequestInput,
-  RequestMiddleware, RequestOperation, RequestOptions,
+  ExtensionDefinition, Match, MatchedOperation, MatchResult, Next, OperationContext,
+  RequestContext, RequestInput, RequestMiddleware, RequestOperation, RequestOptions,
+  ReservedOperationKey, StatusHandlers,
 } from "./types.ts";
 
 export function defineExtension<const OperationApi extends object = {}>(
@@ -57,21 +58,39 @@ function runMiddleware(
 
 type Configuration = CoreOptions & RequestOptions & { readonly extensions?: readonly AnyExtension[] };
 
-function createOperation(context: OperationContext, extensions: readonly AnyExtension[]) {
-  const { response } = context;
-  const operation = Object.assign(Object.create(null), defaultOperationApi(context));
-  for (const extension of extensions) {
-    const contribution = extension.operation?.(context);
-    if (contribution !== undefined) {
-      if ("response" in contribution) throw new TypeError("Extension operation cannot replace response");
-      Object.assign(operation, contribution);
+const reservedOperationKeys = ["response", "then"] as const satisfies readonly ReservedOperationKey[];
+
+function createOperation(
+  context: RequestContext,
+  execute: () => Promise<Response>,
+  extensions: readonly AnyExtension[],
+) {
+  const build = (response: () => Promise<Response>): MatchedOperation<{}> => {
+    const scoped: OperationContext = Object.create(context, {
+      response: { value: response, enumerable: true },
+      execute: { value: execute, enumerable: true },
+      api: { value: (matched: Response) => build(async () => matched), enumerable: true },
+    });
+    const operation = Object.assign(Object.create(null), defaultOperationApi(scoped));
+    for (const extension of extensions) {
+      const contribution = extension.operation?.(scoped);
+      if (contribution !== undefined) {
+        for (const key of reservedOperationKeys) {
+          if (key in contribution) throw new TypeError(`Extension operation cannot replace ${key}`);
+        }
+        Object.assign(operation, contribution);
+      }
     }
-  }
-  Object.defineProperties(operation, {
-    response: { value: response, enumerable: true },
-    then: { value: undefined },
+    return Object.defineProperties(operation, {
+      response: { value: execute, enumerable: true },
+      then: { value: undefined },
+    });
+  };
+  return build(async () => {
+    const response = await execute();
+    if (!response.ok) throw new UnexpectedResponseError(context.request, response);
+    return response;
   });
-  return operation;
 }
 
 function createClient(parent: Configuration = {}, supplied: Configuration = {}): DixousClient {
@@ -106,16 +125,14 @@ function createClient(parent: Configuration = {}, supplied: Configuration = {}):
         : input;
       const request = new Request(source, options);
       let execution: Promise<Response> | undefined;
-      const response = () => {
-        // Store the promise before middleware can synchronously re-enter response().
+      const execute = () => {
+        // Store the promise before middleware can synchronously re-enter execute().
         execution ??= Promise.resolve().then(() => runMiddleware(middleware, context, transport));
         return execution;
       };
-      const context: OperationContext = { input, request, options, response };
-      Object.defineProperties(context, {
-        input: { writable: false }, options: { writable: false }, response: { writable: false },
-      });
-      return createOperation(context, extensions);
+      const context: RequestContext = { input, request, options };
+      Object.defineProperties(context, { input: { writable: false }, options: { writable: false } });
+      return createOperation(context, execute, extensions);
     },
   }) as DixousClient;
 }

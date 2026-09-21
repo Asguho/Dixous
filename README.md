@@ -72,12 +72,6 @@ const xml = defineExtension({
       ): Promise<z.output<Schema>> {
         const response = await operation.response()
 
-        if (!response.ok) {
-          throw new Error(
-            `Unexpected response: ${response.status}`,
-          )
-        }
-
         return parseXml(
           await response.text(),
           schema,
@@ -110,6 +104,27 @@ console.log(catalog.catalog.book)
 ```
 
 Dixous itself knows nothing about XML. Installing the extension adds `.xml(schema)` directly to the request type with full inference.
+
+Inside an extension, `operation.response()` is the response the operation reads. Dixous rejects non-OK responses before the extension sees them, so extensions only decode bodies.
+
+## Branch on status
+
+Use `.match()` when different statuses carry different bodies. Each handler receives the full operation API, including extension methods, bound to the matched response:
+
+```ts
+const result = await api
+  .request("users/1")
+  .match({
+    200: operation => operation.json(User),
+    404: operation => operation.text(),
+    422: operation => operation.json(ValidationError),
+  })
+// User | string | ValidationError
+```
+
+Statuses match exactly. An unmatched status rejects with `UnexpectedResponseError`.
+
+`match` is a default method like `json`. An extension can replace it, using `operation.execute()` for the raw response and `operation.api(response)` to rebuild the operation API over it.
 
 ## Composable by design
 
@@ -222,6 +237,6 @@ if (response.ok) {
 
 It returns the final native `Response` without applying a status policy.
 
-Requests are lazy and memoized per `request()` call, while response bodies keep their normal native consumption semantics.
+Requests are lazy and memoized per `request()` call: `.response()`, `.match()`, and the body readers share one execution, while response bodies keep their normal native consumption semantics.
 
 See [Extensions](./docs/extensions.md) for middleware ordering, retries, caching, logging, custom formats, extension state, and advanced composition.

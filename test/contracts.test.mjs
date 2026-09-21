@@ -128,7 +128,7 @@ for (const [parentIndex, parentForm] of headerForms.entries()) {
   }
 }
 
-test('factories and middleware share independent per-operation contexts and stable option snapshots', async () => {
+test('factories observe middleware contexts live and keep stable option snapshots', async () => {
   const states = new WeakMap();
   const contexts = [];
   const replacement = new Request(`${url}replacement`, { headers: { 'x-mode': 'replacement' } });
@@ -137,19 +137,17 @@ test('factories and middleware share independent per-operation contexts and stab
     label: 'client', extensions: [inspect, defineExtension({
       operation(context) {
         assert.ok(context.request instanceof Request);
-        states.set(context, { original: context.request });
+        states.set(context.request, context);
         contexts.push(context);
         return { currentRequest: () => context.request };
       },
       async request(context, next) {
         middlewareCalls++;
-        assert.ok(states.has(context));
-        assert.equal(context.request, states.get(context).original);
+        assert.equal(states.get(context.request).request, context.request);
         context.request = replacement;
         return next();
       },
     }), defineExtension({ async request(context, next) {
-      assert.ok(states.has(context));
       assert.equal(context.request, replacement);
       return next();
     } })], fetch: async request => {
@@ -406,16 +404,67 @@ test('extension methods are instantiated independently per operation', () => {
   assert.equal(second.increment(), 1);
 });
 
-for (const contribution of [
-  { response: () => new Response() },
-  Object.create({ response: () => new Response() }),
-  Object.defineProperty({}, 'response', { value: undefined }),
-]) {
-  test('reserved response rejects runtime contributions, including inherited and non-enumerable properties', () => {
-    const client = Dixous.create({ extensions: [{ operation: () => contribution }] });
-    assert.throws(() => client.request(url), TypeError);
-  });
+for (const key of ['response', 'then']) {
+  for (const contribution of [
+    { [key]: () => new Response() },
+    Object.create({ [key]: () => new Response() }),
+    Object.defineProperty({}, key, { value: undefined }),
+  ]) {
+    test(`reserved ${key} rejects runtime contributions, including inherited and non-enumerable properties`, () => {
+      const client = Dixous.create({ extensions: [{ operation: () => contribution }] });
+      assert.throws(() => client.request(url), TypeError);
+    });
+  }
 }
+
+test('match hands each handler the full operation API bound to the matched response', async () => {
+  let calls = 0;
+  let factories = 0;
+  const request = new Request(`${url}final`);
+  const client = Dixous.create({ fetch: async () => { calls++; return Response.json({ id: 1 }, { status: 404 }); },
+    extensions: [
+      defineExtension({ async request(context, next) { context.request = request; return next(); } }),
+      defineExtension({ operation(context) {
+        factories++;
+        return { status: async () => (await context.response()).status };
+      } }),
+    ],
+  });
+  const operation = client.request(url);
+  assert.equal(factories, 1);
+  const outcome = await operation.match({
+    200: () => assert.fail('wrong handler'),
+    async 404(matched) {
+      assert.equal(matched.then, undefined);
+      assert.equal(await matched.status(), 404);
+      assert.equal((await matched.response()).status, 404);
+      return matched.json(schema);
+    },
+  });
+  assert.deepEqual(outcome, { id: 1 });
+  assert.equal(factories, 2);
+  assert.equal(calls, 1);
+  assert.equal((await operation.response()).status, 404);
+  await assert.rejects(operation.text(), UnexpectedResponseError);
+  await assert.rejects(client.request(url).match({ 200: () => 'ok' }), error => {
+    assert.ok(error instanceof UnexpectedResponseError);
+    assert.equal(error.request, request);
+    assert.equal(error.response.status, 404);
+    return true;
+  });
+  assert.equal(await client.request(url).match({ 404: () => 'sync value' }), 'sync value');
+});
+
+test('match is a default method that extensions can replace using execute and api', async () => {
+  const ranged = defineExtension({ operation: context => ({
+    async match(handlers) {
+      const response = await context.execute();
+      return handlers[`${Math.floor(response.status / 100)}xx`](context.api(response));
+    },
+  }) });
+  const client = Dixous.create({ fetch: async () => new Response('missing', { status: 404 }), extensions: [ranged] });
+  assert.equal(await client.request(url).match({ '4xx': operation => operation.text() }), 'missing');
+});
 
 test('consumers import a configured client and specialize it without affecting other consumers', async () => {
   const { client: shared } = await import('./fixtures/shared-client.mjs');
