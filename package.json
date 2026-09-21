@@ -1,6 +1,6 @@
 {
   "name": "dixous",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A minimal, extension-driven query client built on native Fetch.",
   "type": "module",
   "files": [
