@@ -197,3 +197,11 @@ test('native URL resolution, abort signals, and derived transports', async () =>
   assert.equal(await api.create({ fetch: async () => new Response('child') }).request('/').text(), 'child');
   assert.equal(await api.request('/').text(), 'parent');
 });
+
+test('default transport resolves globalThis.fetch per request, not at client creation', async t => {
+  const api = Dixous.create({ baseUrl: url });
+  let received;
+  t.mock.method(globalThis, 'fetch', async request => { received = request; return new Response('patched'); });
+  assert.equal(await api.request('late').text(), 'patched');
+  assert.equal(received.url, `${url}late`);
+});

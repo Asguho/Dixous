@@ -95,7 +95,7 @@ export interface CoreOptions {
   readonly baseUrl?: string | URL;
   /** Defaults merged by header name in derived clients and requests. */
   readonly headers?: HeadersInit;
-  /** Defaults to globalThis.fetch. */
+  /** Defaults to globalThis.fetch, looked up on each request. */
   readonly fetch?: typeof globalThis.fetch;
 }
 

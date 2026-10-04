@@ -37,7 +37,7 @@ function mergeHeaders(...sources: (HeadersInit | undefined)[]): Headers {
 function runMiddleware(
   middleware: readonly RequestMiddleware[],
   context: RequestContext,
-  transport: typeof globalThis.fetch,
+  transport: (request: Request) => Promise<Response>,
 ): Promise<Response> {
   async function dispatch(index: number): Promise<Response> {
     const current = middleware[index];
@@ -106,7 +106,8 @@ function createClient(parent: Configuration = {}, supplied: Configuration = {}):
   });
   const { extensions, ...clientOptions } = configuration;
   const middleware = extensions.flatMap(entry => entry.request ? [entry.request] : []);
-  const transport = configuration.fetch ?? globalThis.fetch;
+  // Resolve the global per request so later patches (mocks, instrumentation) apply.
+  const transport = configuration.fetch ?? ((request: Request) => globalThis.fetch(request));
 
   return Object.freeze({
     create(options?: Configuration) { return createClient(configuration, options); },
